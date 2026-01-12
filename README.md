@@ -1,124 +1,113 @@
-# 飞书会议自动归档助手 (Feishu Meeting Auto-Downloader)
+# Feishu Meeting Auto-Downloader (飞书会议自动录制下载器)
 
-这是一个基于飞书开放平台 API 开发的企业级自动化工具，专为公司内部部署设计。它能够自动监听、识别并下载全公司已授权员工的飞书妙计（会议录制）视频到本地服务器，实现会议资产的自动归档与备份。
+这是一个基于飞书开放平台 (Lark Open Platform) 的企业级自动化工具。旨在解决企业会议归档痛点，自动监听并下载员工的会议录制文件。
 
-## ✨ 核心功能亮点
+## ✨ 核心特性
 
-*   **🔒 企业级多用户支持**
-    *   **权限隔离**：采用 OAuth 2.0 用户授权模式。机器人自动识别会议的“拥有者”，并使用该员工自己的 Token 进行下载，完美解决跨部门/私有会议的 `Permission Deny` 问题。
-    *   **一次授权，永久有效**：内置 Token 自动刷新机制，员工只需首次点击链接授权，后续无需任何操作。
-
-*   **🔄 双轨制自动下载策略**
-    *   **轨道一：实时推送 (Webhook)**
-        *   针对 API 创建的会议，监听 `vc.meeting.recording_ready_v1` 事件，实现毫秒级响应，录制结束即刻下载。
-    *   **轨道二：智能巡检 (Auto Polling)**
-        *   内置后台巡检服务（Polling Service），每 5 分钟自动检查一次已授权员工的最近会议。
-        *   **完美解决痛点**：填补了飞书官方“手动创建会议不触发 Webhook”的缺陷，确保任何形式（手动发起、日程会议）的录制都能被抓取。
-
-*   **🛡 隐私与安全**
-    *   **本地存储**：所有视频文件直接保存至服务器本地目录（`./downloads`），数据不经过第三方云存储。
-    *   **最小权限原则**：仅申请妙计只读权限 (`minutes:minutes:readonly`)，自动剥离了敏感的云文档全局读取权限 (`drive:drive:readonly`)，更符合企业安全规范。
+- **🤖 全自动监听**：无需人工干预，通过 Webhook 实时监听“会议录制完成”事件。
+- **🔐 多用户/多租户支持**：
+    - 支持企业内多位员工同时使用。
+    - 严格遵循隐私安全原则，**谁的会议用谁的身份下载**。
+    - 采用 **OAuth2 User Token** 模式，由员工授权，应用自动代理下载。
+- **⚡️ 极速直连下载**：
+    - 破解传统 API 迷宫，直接通过妙计 Token (`obcn...`) 获取下载直链。
+    - 摒弃繁琐的“查会议ID -> 查文档权限”旧流程，效率提升且权限依赖更少。
+- **🔄 Token 自动续期**：内置 Token 自动刷新机制，一次授权，永久有效。
+- **🛡 安全合规**：
+    - 仅申请最小必要权限 (`minutes:minutes.media:export`)。
+    - 所有下载操作基于用户明确授权，可审计追溯。
 
 ---
 
-## 🛠 技术架构
+## 🏗 架构原理
 
-*   **语言**: Python 3.9+
-*   **Web 框架**: Flask (用于接收 Webhook 回调及处理 OAuth 授权)
-*   **API 交互**: Requests + Lark Open Platform SDK
-*   **数据管理**:
-    *   `token_manager.py`: 线程安全的 Token 存取与自动刷新逻辑。
-    *   `user_tokens.json`: 轻量级本地 JSON 存储（无数据库依赖，部署极简）。
+本项目采用 **Webhook 事件驱动 + OAuth2 授权代理** 架构：
 
-## 📂 项目结构说明
-
-```text
-.
-├── listen_recording.py    # [主程序] Web服务器入口，处理 Webhook 事件与用户授权
-├── vedio_api.py           # [核心逻辑] 封装飞书 API 调用、视频流下载、Token 刷新
-├── polling_service.py     # [后台服务] 自动轮询线程，负责抓取手动创建的会议
-├── token_manager.py       # [数据层] 管理多用户的 Token 读取与写入
-├── config.json            # [配置文件] 存放 AppID、Secret 等应用配置
-├── user_tokens.json       # [自动生成] 存储已授权用户的 Token 数据 (勿删)
-├── download_history.json  # [自动生成] 记录已下载过的会议 ID，防止重复下载
-├── requirements.txt       # 依赖包列表
-└── downloads/             # 视频文件下载目录
-```
+1.  **事件触发**：飞书会议结束并完成云端转码后，向本服务推送 `vc.meeting.recording_ready_v1` 事件。
+2.  **身份识别**：服务解析事件，提取 `owner_id` (会议拥有者) 和 `minute_token` (妙计标识)。
+3.  **智能代理**：
+    - 从本地持久化存储 (`user_tokens.json`) 中查找该 Owner 的 Access Token。
+    - 如果 Token 过期，自动使用 Refresh Token 进行无感刷新。
+4.  **直连下载**：使用 Owner 的身份凭证，调用妙计 API 获取 MP4 直链并流式下载到本地。
 
 ---
 
-## 🚀 部署指南 (Deploy)
+## 🚀 快速开始
 
-### 1. 环境准备
-确保服务器已安装 Python 3.9 或以上版本。
-```bash
-git clone [你的仓库地址]
-cd feishu_minute
-# 建议创建虚拟环境
-python3 -m venv .venv
-source .venv/bin/activate
-# 安装依赖
-pip install -r requirements.txt
-```
+### 1. 飞书开发者后台配置
 
-### 2. 应用配置
-编辑 `config.json` 文件，填入飞书开放平台的信息：
-```json
-{
-    "app_id": "cli_xxxxxxxxxxxx",
-    "app_secret": "xxxxxxxxxxxxxxxxxxxxxxxx",
-    "encrypt_key": "",
-    "verification_token": "xxxxxxxxxxxxxxxxxxxxxxxx",
-    "download_path": "./downloads"
-}
-```
-*   *注意：`encrypt_key` 如果后台没开启加密可留空。*
-
-### 3. 飞书后台配置
-登录 [飞书开放平台](https://open.feishu.cn/app)，进入你的应用：
-1.  **权限管理** -> 开通以下权限并**发布版本**：
-    *   `minutes:minutes:readonly` (查看妙计内容)
-    *   `minutes:minutes.media:export` (导出妙计媒体)
-    *   `contact:user.id:readonly` (获取用户 User ID)
-2.  **事件订阅** -> 配置请求地址：
-    *   `http://你的公网IP:29090/webhook/event`
-3.  **安全设置** -> 配置重定向 URL：
-    *   `http://你的公网IP:29090/auth/callback`
-
-### 4. 启动服务
-建议在生产环境使用 `nohup` 后台运行：
-```bash
-nohup python3 listen_recording.py > server.log 2>&1 &
-```
-服务启动后将监听 `0.0.0.0:29090`。
+1.  **创建应用**：在 [飞书开发者后台](https://open.feishu.cn/app) 创建一个**企业自建应用**。
+2.  **开通权限**：
+    *   `下载妙记的音视频文件` (minutes:minutes.media:export) —— *核心下载权限*
+    *   `获取用户 user ID` (contact:user.id:readonly) —— *用于识别会议归属*
+3.  **事件订阅**：
+    *   配置请求网址 URL（开发环境可使用 Ngrok 等内网穿透工具）。
+    *   添加事件：`录制完成` (vc.meeting.recording_ready_v1)。
+4.  **安全设置**：
+    *   在“重定向 URL”中添加回调地址：`https://你的域名/auth/callback`。
+5.  **发布版本**：所有配置完成后，务必在该页面创建版本并申请发布。
 
 ---
 
-## 👥 员工使用手册
+### 2. 本地环境部署
 
-### 步骤一：全员授权 (仅需一次)
-管理员将授权链接分发给公司员工：
-> **授权链接**: `http://你的服务器IP:29090/auth/start`
+**环境要求**：Python 3.8+
 
-员工点击链接 -> 点击“授权开启” -> 看到成功提示即可。
-*这一步是为了让机器人获取下载该员工名下会议的权限。*
+1.  **安装依赖**：
+    ```bash
+    pip install flask requests lark-oapi
+    ```
 
-### 步骤二：日常使用
-员工无需任何操作。只需正常使用飞书开会并录制，会议结束后（约 5-10 分钟内），视频文件会自动出现在服务器的 `downloads` 目录下。
+2.  **配置文件**：
+    创建 `config.json`：
+    ```json
+    {
+        "app_id": "cli_xxxxxxxx",
+        "app_secret": "xxxxxxxx",
+        "encrypt_key": "",
+        "verification_token": "xxxxxxxx",
+        "download_path": "./downloads"
+    }
+    ```
+
+3.  **启动服务**：
+    ```bash
+    python3 listen_recording.py
+    ```
+    服务默认监听 `29090` 端口。
 
 ---
 
-## ❓ 常见问题 (Q&A)
+### 3. 使用流程 (User Journey)
 
-**Q1: 为什么手动开的会没有立即下载？**
-A: 手动会议不触发 Webhook，依赖后台巡检服务。巡检每 5 分钟运行一次，所以可能会有几分钟的延迟，这是正常现象。
+**Step 1: 员工授权 (首次必需)**
+为了保护隐私，应用不能随意下载员工的会议。员工需进行一次性授权：
+*   访问 `https://你的域名/auth/start`
+*   点击“授权开启”
+*   *成功后，应用获得该员工的长期“代理下载权”。*
 
-**Q2: 如何重新下载已下载过的视频？**
-A: 修改 `download_history.json`，删除对应的 `object_token`，系统会在下一次巡检时重新下载。
-
-**Q3: Token 过期了怎么办？**
-A: 系统会在下载前自动检查 Token 有效期并自动刷新，无需员工重新登录。
+**Step 2: 正常使用**
+*   员工正常使用飞书开会、录制。
+*   会议结束后，录制文件会自动下载到服务器的 `./downloads` 目录，文件名为 `obcn_xxxx.mp4`。
+*   (可选) 你可以进一步开发脚本，将下载好的文件上传到 NAS 或对象存储。
 
 ---
 
-*Developed for internal efficiency optimization.*
+## ❓ 常见问题 (FAQ)
+
+**Q: 为什么要用 User Token 而不是 Tenant Token (机器人身份)?**
+A: 飞书的安全机制决定了机器人默认**不可见**员工的私有会议录制。使用 User Token 可以完美解决“可见性”问题，实现零感知的自动化下载，且符合“谁授权下谁的数据”的安全原则。
+
+**Q: Token 会过期吗？**
+A: `user_access_token` 有效期仅 2 小时，但通过我们的 `refresh_token` 机制（有效期 30 天且滚动刷新），只要应用保持运行或定期有任务触发，理论上授权永久有效。
+
+**Q: 下载失败提示 Token 无效？**
+A: 请让该员工重新访问 `/auth/start` 页面重新授权一次即可。
+
+---
+
+## 📂 项目结构
+*   `listen_recording.py`: 主服务，负责 Webhook 监听与 OAuth 授权流程。
+*   `vedio_api.py`: 核心下载引擎，封装了妙计 API 和 Token 刷新逻辑。
+*   `token_manager.py`: 身份凭证管理，负责 Token 的安全存储与读取。
+*   `create_api_meeting.py`: (测试用) 快速创建 API 会议用于验证功能。
