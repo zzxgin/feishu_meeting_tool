@@ -24,14 +24,11 @@ def do_download_task(token, user_id):
         
         if user_data:
             user_access_token = user_data.get("user_access_token")
-            print(f"--- [后台线程] 找到用户 Token: {user_access_token[:10]}... ---")
         else:
             print(f"--- [后台线程] [警告] 未找到用户 {user_id} 的 Token！无法下载私有视频。请让该用户先进行授权。---")
-            # 这里可以扩展：尝试用机器人 Token 发消息给用户提醒授权
             return
 
         # 2. 调用 vedio_api 进行下载
-        # 注意：这里我们不再需要 passing client, vedio_api 内部会创建
         vedio_api.download_single_video(token, user_id, user_access_token)
         
         print(f"--- [后台线程] 任务结束 ---")
@@ -39,28 +36,20 @@ def do_download_task(token, user_id):
         print(f"[后台线程] 下载异常: {e}")
 
 def do_p2_recording_ready(data: P2VcMeetingRecordingReadyV1) -> None:
-    # 1. 获取事件内容
-    # print(f"[收到事件] {lark.JSON.marshal(data)}")
-    
     event_url = data.event.url
-    
-    # 提取 User ID (Owner)
     try:
         owner_id = data.event.meeting.owner.id.user_id
     except AttributeError:
-        print("[错误] 无法从事件中提取 meeting.owner.id.user_id")
+        print("[错误] 无法从事件中提取 user_id")
         owner_id = "unknown"
         
     print(f"[事件侦测] 录制完成 | URL: {event_url} | Owner: {owner_id}")
     
-    # 2. 提取 minute_token
+    # 提取 minute_token 并启动下载
     match = re.search(r'(obcn[a-z0-9]+)', event_url)
     if match:
         token = match.group(1)
         print(f"提取到 Token: {token}，正在启动后台下载线程...")
-        
-        # 3. 启动线程进行下载
-        print(f"等待 60 秒后开始下载，给妙计生成预留时间...")
         t = threading.Timer(60.0, do_download_task, args=(token, owner_id))
         t.start()
     else:
@@ -80,15 +69,8 @@ def main():
     @app.route("/webhook/event", methods=["POST"])
     def event():
         # print(f"\n[{threading.current_thread().name}] === 收到 HTTP 请求 ===")
-        try:
-            handler.do(parse_req())
-        except Exception as e:
-            # 这里的 handler.do 可能会因为 parse 失败抛错，我们捕获它但不阻断返回
-            # Flask adapter 会自动处理异常返回，但如果我们需要自定义 logging
-            print(f"Handler Error: {e}")
-            pass
-        
         # 飞书要求返回 200 Keep-Alive，lark-oapi 自动处理
+        # 修复：直接返回处理结果，不要重复调用 handler.do()
         return parse_resp(handler.do(parse_req()))
 
     # --- 新增：Auth 授权路由 ---
@@ -101,9 +83,11 @@ def main():
             
         redirect_uri = f"{scheme}://{host}/auth/callback"
         
-        # 权限范围
-        # 回退去掉了 drive 权限，尝试只用 minutes 权限下载
-        scope = "minutes:minutes:readonly minutes:minutes.media:export contact:user.id:readonly" 
+        # 权限范围：
+        # 1. minutes:minutes.media:export -> 直接下载妙计音视频文件（核心权限）
+        # 2. contact:user.id:readonly -> 获取用户身份
+        # 说明：使用妙计API直接下载，只需这两个权限即可
+        scope = "minutes:minutes.media:export contact:user.id:readonly" 
         app_id = config['app_id']
         
         from urllib.parse import quote
