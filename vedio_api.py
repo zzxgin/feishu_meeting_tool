@@ -14,6 +14,100 @@ def load_config():
     except FileNotFoundError:
         return {}
 
+def get_tenant_access_token():
+    """
+    获取 tenant access token (用于机器人发消息)
+    """
+    config = load_config()
+    client = lark.Client.builder() \
+        .app_id(config.get("app_id")) \
+        .app_secret(config.get("app_secret")) \
+        .build()
+    
+    # 使用 Internal/Old 方式构建 (适配不同版本的 SDK)
+    # 如果是 SDK v2.x 或 v1.x，结构可能是 lark.api.authen.v1.model.CreateTenantAccessTokenReq
+    # 这里使用万能的 raw request 方式，避免 SDK 版本差异
+    
+    url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+    headers = {"Content-Type": "application/json; charset=utf-8"}
+    body = {
+        "app_id": config.get("app_id"),
+        "app_secret": config.get("app_secret")
+    }
+    
+    try:
+        resp = requests.post(url, headers=headers, json=body)
+        data = resp.json()
+        if data.get("code") == 0:
+            return data.get("tenant_access_token")
+        else:
+            print(f"[Tenant Token Error] {data}")
+            return None
+    except Exception as e:
+         print(f"[Tenant Token Exception] {e}")
+         return None
+
+def send_success_notification(user_id, file_name):
+    """
+    发送下载成功通知卡片
+    """
+    token = get_tenant_access_token()
+    if not token:
+        return
+
+    # 卡片内容
+    card_content = {
+        "config": {
+            "wide_screen_mode": True
+        },
+        "elements": [
+            {
+                "tag": "div",
+                "text": {
+                    "content": f"✅ **会议录制已自动存档**\n📄 文件名：{file_name}",
+                    "tag": "lark_md"
+                }
+            },
+            {
+                "tag": "note",
+                "elements": [
+                    {
+                        "content": "文件已保存至服务器 downloads 目录",
+                        "tag": "lark_md"
+                    }
+                ]
+            }
+        ],
+        "header": {
+            "template": "blue",
+            "title": {
+                "content": "下载完成通知",
+                "tag": "plain_text"
+            }
+        }
+    }
+
+    url = "https://open.feishu.cn/open-apis/im/v1/messages"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json; charset=utf-8"
+    }
+    params = {"receive_id_type": "user_id"}
+    body = {
+        "receive_id": user_id,
+        "msg_type": "interactive",
+        "content": json.dumps(card_content)
+    }
+
+    try:
+        resp = requests.post(url, headers=headers, params=params, json=body)
+        if resp.status_code != 200:
+             print(f"[消息发送失败] {resp.json()}")
+        else:
+             print(f"[消息发送成功] 通知已发送给用户 {user_id}")
+    except Exception as e:
+        print(f"[消息发送异常] {e}")
+
 def refresh_user_token_for_user(client, user_id, current_refresh_token):
     """
     专门为指定用户刷新 Token
@@ -113,6 +207,10 @@ def download_single_video(object_token, user_id, user_access_token=None, meeting
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
         print(f"下载完成: {file_path}")
+        
+        # 发送通知
+        send_success_notification(user_id, f"{object_token}.mp4")
+        
     except Exception as e:
         print(f"下载异常: {e}")
 
