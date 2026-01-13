@@ -198,6 +198,12 @@ def download_single_video(object_token, user_id, user_access_token=None, meeting
         os.makedirs(download_dir)
 
     file_path = os.path.join(download_dir, f"{object_token}.mp4")
+
+    # 去重检查：如果文件已存在且大小大于0，则认为已下载，保留覆盖逻辑
+    # 您可以根据需求选择：
+    # 策略A (覆盖): 每次都下载覆盖 (适合文件可能更新的场景) -> 删除下面的 if 块
+    # 策略B (跳过): 存在即不下载 (节省带宽) -> 保留下面的 if 块
+    # 当前选择：覆盖 (按照您的要求：直接覆盖)
     
     print(f"正在下载文件到: {file_path}")
     try:
@@ -262,3 +268,23 @@ def _get_download_url(object_token, access_token):
         print(f"[请求异常] {e}")
     
     return None
+
+def get_recording_info(meeting_id, user_access_token):
+    """
+    通过 user_access_token 查询会议录制信息
+    权限要求: vc:record:readonly
+    """
+    url = f"https://open.feishu.cn/open-apis/vc/v1/meetings/{meeting_id}/recording"
+    headers = {
+        "Authorization": f"Bearer {user_access_token}"
+    }
+    try:
+        resp = requests.get(url, headers=headers)
+        if resp.status_code == 200:
+            return resp.json()
+        else:
+            print(f"[获取录制信息失败] Status: {resp.status_code}, Body: {resp.text}")
+            return None
+    except Exception as e:
+        print(f"[获取录制信息异常] {e}")
+        return None

@@ -16,8 +16,6 @@ def do_download_task(token, user_id):
     具体的下载任务，在独立线程中运行
     """
     try:
-        print(f"--- [后台线程] 开始处理任务 | FileToken: {token} | OwnerID: {user_id} ---")
-
         # 1. 尝试从 TokenManager 获取该用户的 Token
         user_data = token_manager.get_user_token(user_id)
         user_access_token = None
@@ -25,35 +23,72 @@ def do_download_task(token, user_id):
         if user_data:
             user_access_token = user_data.get("user_access_token")
         else:
-            print(f"--- [后台线程] [警告] 未找到用户 {user_id} 的 Token！无法下载私有视频。请让该用户先进行授权。---")
+            print(f"[跳过] 用户 {user_id} 未授权")
             return
 
         # 2. 调用 vedio_api 进行下载
         vedio_api.download_single_video(token, user_id, user_access_token)
         
-        print(f"--- [后台线程] 任务结束 ---")
     except Exception as e:
-        print(f"[后台线程] 下载异常: {e}")
+        print(f"[下载异常] {e}")
 
-def do_p2_recording_ready(data: P2VcMeetingRecordingReadyV1) -> None:
-    event_url = data.event.url
-    try:
-        owner_id = data.event.meeting.owner.id.user_id
-    except AttributeError:
-        print("[错误] 无法从事件中提取 user_id")
-        owner_id = "unknown"
-        
-    print(f"[事件侦测] 录制完成 | URL: {event_url} | Owner: {owner_id}")
+def check_recording_loop(meeting_id, owner_id, attempt=1):
+    """
+    轮询检查录制是否生成 (适用于手动创建的会议)
+    """
+    if attempt > 10: # 最多尝试 10 分钟
+        # print(f"[停止轮询] 会议 {meeting_id} 录制未生成或超时") # 可选：静默停止
+        return
+
+    # print(f"[轮询检查] 第 {attempt} 次 (Meeting: {meeting_id})") # 保持静默，除非调试
     
-    # 提取 minute_token 并启动下载
-    match = re.search(r'(obcn[a-z0-9]+)', event_url)
-    if match:
-        token = match.group(1)
-        print(f"提取到 Token: {token}，正在启动后台下载线程...")
-        t = threading.Timer(60.0, do_download_task, args=(token, owner_id))
+    # 1. Token 检查
+    user_data = token_manager.get_user_token(owner_id)
+    if not user_data:
+        # 此处不打印，以免未授权用户每次开会都报错
+        return
+        
+    user_token = user_data.get("user_access_token")
+    
+    # 2. 调用 API 查询 (需 vc:recording:readonly 权限)
+    res = vedio_api.get_recording_info(meeting_id, user_token)
+    
+    # 3. 结果判断
+    # 成功拿到 url
+    if res and res.get('code') == 0 and res.get('data', {}).get('recording', {}).get('url'):
+        url = res['data']['recording']['url']
+        
+        # 提取 token 并下载
+        match = re.search(r'(obcn[a-z0-9]+)', url)
+        if match:
+             token = match.group(1)
+             print(f"[✅ 录制就绪] Token: {token} | 准备下载...")
+             do_download_task(token, owner_id)
+        return
+        
+    # 失败则重试
+    # print(f"[等待] 录制尚未准备好，60秒后重试...")
+    t = threading.Timer(60.0, check_recording_loop, args=(meeting_id, owner_id, attempt + 1))
+    t.start()
+
+def do_p2_meeting_ended(data: P2VcMeetingAllMeetingEndedV1) -> None:
+    try:
+        # 修正：根据 SDK 结构，meeting_id 和 owner 信息在 data.event.meeting 下
+        meeting_id = data.event.meeting.id  
+        owner_id = data.event.meeting.owner.id.user_id
+        
+        print(f"[事件侦测] 会议结束 (All Meeting Ended) | ID: {meeting_id} | Owner: {owner_id} | 启动查询...")
+        
+        # 延迟 30秒开始第一次检查
+        t = threading.Timer(30.0, check_recording_loop, args=(meeting_id, owner_id))
         t.start()
-    else:
-        print("未能从 URL 中提取到 token")
+        
+    except Exception as e:
+        print(f"[事件处理错误] {e}")
+
+# 新增：静默处理器，专门用来吞掉 API 会议多余的 recording_ready 事件，防止报错
+def do_silence_recording_ready(data: P2VcMeetingRecordingReadyV1) -> None:
+    pass
 
 def main():
     config = vedio_api.load_config()
@@ -62,7 +97,8 @@ def main():
 
     # 1. 构造事件 Dispatcher
     handler = lark.EventDispatcherHandler.builder(encrypt_key, verification_token, lark.LogLevel.INFO) \
-        .register_p2_vc_meeting_recording_ready_v1(do_p2_recording_ready) \
+        .register_p2_vc_meeting_all_meeting_ended_v1(do_p2_meeting_ended) \
+        .register_p2_vc_meeting_recording_ready_v1(do_silence_recording_ready) \
         .build()
 
     # 2. 注册 Flask 路由
@@ -86,8 +122,8 @@ def main():
         # 权限范围：
         # 1. minutes:minutes.media:export -> 直接下载妙计音视频文件（核心权限）
         # 2. contact:user.id:readonly -> 获取用户身份
-        # 说明：使用妙计API直接下载，只需这两个权限即可
-        scope = "minutes:minutes.media:export contact:user.id:readonly" 
+        # 3. vc:record:readonly -> 获取会议录制信息 (用于手动会议)
+        scope = "minutes:minutes.media:export contact:user.id:readonly vc:record:readonly" 
         app_id = config['app_id']
         
         from urllib.parse import quote
