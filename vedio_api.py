@@ -3,16 +3,22 @@ import os
 import requests
 import lark_oapi as lark
 from token_manager import token_manager
+from dotenv import load_dotenv
+
+# 加载 .env 文件
+load_dotenv()
 
 def load_config():
     """
-    读取本地 config.json 配置文件
+    读取环境变量配置 (支持 .env 文件)
     """
-    try:
-        with open('config.json', 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}
+    return {
+        "app_id": os.getenv("APP_ID"),
+        "app_secret": os.getenv("APP_SECRET"),
+        "encrypt_key": os.getenv("ENCRYPT_KEY", ""),
+        "verification_token": os.getenv("VERIFICATION_TOKEN"),
+        "download_path": os.getenv("DOWNLOAD_PATH", "./downloads")
+    }
 
 def get_tenant_access_token():
     """

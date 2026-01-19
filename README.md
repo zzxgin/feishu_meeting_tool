@@ -58,7 +58,29 @@
 5.  **发布版本**：
     *   **重要**：所有配置完成后，必须在“版本管理与发布”页面创建版本并发布，配置才会生效。
 
-### 2. 本地环境部署
+### 3. CI/CD 自动化部署 (GitLab CI)
+
+本项目已配置 GitLab CI/CD 流程。当您把代码推送到 `main` 分支时，会自动部署到您的服务器。
+
+#### 前置准备
+1.  **服务器准备**：确保您的云服务器安装了 `python3`, `pip`, `venv`。
+2.  **创建目录**：在服务器上创建目录 `mkdir -p /opt/feishu_minute` 并确保您的 SSH 用户有读写权限。
+
+#### GitLab CI/CD 变量配置
+请在 GitLab 仓库的 **Settings** -> **CI/CD** -> **Variables** 中添加以下 Key/Value（记得取消勾选 "Protect variable" 除非你的分支也是受保护的）：
+
+| Key (变量名) | 说明 | 类型 |
+| :--- | :--- | :--- |
+| `PRODUCTION_HOST` | 服务器 IP 地址 | Variable |
+| `PRODUCTION_USER` | SSH 用户名 (如 root) | Variable |
+| `SSH_PRIVATE_KEY` | SSH 私钥内容 (cat ~/.ssh/id_rsa) | Variable (File 类型也可，需微调配置) |
+| `PRODUCTION_APP_ID` | 飞书应用 App ID | Variable |
+| `PRODUCTION_APP_SECRET` | 飞书应用 App Secret | Variable |
+| `PRODUCTION_VERIFICATION_TOKEN` | 飞书事件验证 Token | Variable |
+
+配置完成后，每次 `git push` 即可自动发布。
+
+### 4. 本地环境部署 (开发用)
 
 **环境要求**：Python 3.8+
 
@@ -68,17 +90,15 @@
     ```
 
 2.  **配置文件**：
-    创建或修改 `config.json`，填入你的应用凭证：
-    ```json
-    {
-        "app_id": "cli_xxxxxxxx",
-        "app_secret": "xxxxxxxx",
-        "encrypt_key": "",
-        "verification_token": "xxxxxxxx",
-        "download_path": "./downloads"
-    }
+    创建 `.env` 文件 (可参考 `.env.example`)，填入你的应用凭证：
+    ```bash
+    APP_ID=cli_xxxxxxxx
+    APP_SECRET=xxxxxxxx
+    ENCRYPT_KEY=
+    VERIFICATION_TOKEN=xxxxxxxx
+    DOWNLOAD_PATH=./downloads
     ```
-    *注：`encrypt_key` 如果在后台开启了加密则需填写，否则留空。*
+    *注：`ENCRYPT_KEY` 如果在后台开启了加密则需填写，否则留空。*
 
 3.  **启动服务**：
     ```bash

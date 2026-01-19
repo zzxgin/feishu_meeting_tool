@@ -1,0 +1,82 @@
+stages:
+  - build
+  - deploy
+
+variables:
+  # 镜像名称，改为指向 Harbor
+  # 组合格式: Harbor地址/项目名/应用名:标签
+  IMAGE_TAG: $HARBOR_URL/$HARBOR_PROJECT/feishu-minute:latest
+  # 容器运行时的名称
+  CONTAINER_NAME: feishu-minute-app
+  # 数据挂载目录 (服务器上的目录)
+  HOST_DATA_DIR: /root/feishu_data
+
+# 构建阶段：构建 Docker 镜像并推送到 Harbor
+build_image:
+  stage: build
+  tags:
+    - docker
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - echo "Logging in to Harbor..."
+    - docker login -u "$HARBOR_USER" -p "$HARBOR_PASSWORD" $HARBOR_URL
+    - echo "Building Docker image..."
+    - docker build -t $IMAGE_TAG .
+    - echo "Pushing Docker image..."
+    - docker push $IMAGE_TAG
+  only:
+    - main
+
+# 部署阶段：SSH 连上服务器，拉取镜像并运行
+deploy_container:
+  stage: deploy
+  tags:
+    - docker
+  image: alpine:latest
+  before_script:
+    # 安装 SSH 客户端
+    - 'command -v ssh-agent >/dev/null || ( apk add --update openssh )'
+    - eval $(ssh-agent -s)
+    # 注入 SSH 私钥
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    # 扫描接收服务器公钥
+    - ssh-keyscan $SERVER_IP >> ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+  script:
+    - echo "Deploying to server $SERVER_IP..."
+    - |
+      ssh $SERVER_USER@$SERVER_IP "
+        # 1. 创建数据目录
+        mkdir -p $HOST_DATA_DIR/downloads
+        
+        # 2. 生成环境变量文件 (每次部署重新生成，确保配置最新)
+        echo 'APP_ID=$APP_ID' > $HOST_DATA_DIR/.env
+        echo 'APP_SECRET=$APP_SECRET' >> $HOST_DATA_DIR/.env
+        echo 'APP_VERIFICATION_TOKEN=$APP_VERIFICATION_TOKEN' >> $HOST_DATA_DIR/.env
+        echo 'APP_ENCRYPT_KEY=$APP_ENCRYPT_KEY' >> $HOST_DATA_DIR/.env
+        
+        # 3. 登录 Harbor (防止 token 过期，每次都登)
+        docker login -u '$HARBOR_USER' -p '$HARBOR_PASSWORD' '$HARBOR_URL'
+        
+        # 4. 拉取最新镜像
+        docker pull $IMAGE_TAG
+        
+        # 5. 停止并删除旧容器
+        docker stop $CONTAINER_NAME || true
+        docker rm $CONTAINER_NAME || true
+        
+        # 6. 启动新容器
+        docker run -d \
+          --name $CONTAINER_NAME \
+          --restart always \
+          -p 29090:29090 \
+          -v $HOST_DATA_DIR/downloads:/app/downloads \
+          --env-file $HOST_DATA_DIR/.env \
+          $IMAGE_TAG
+      "
+  only:
+    - main

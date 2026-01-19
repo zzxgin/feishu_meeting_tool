@@ -208,8 +208,20 @@ def main():
             print(f"[Auth Callback Error] {e}")
             return f"❌ 内部异常: {str(e)}"
 
+    # 区分开发环境和生产环境
+    # 如果是本地调试，直接运行 main() 则使用 Flask 自带服务器
+    # 如果是生产环境，通常通过 python listen_recording.py 运行，但也推荐用 waitress
     print(f"启动 HTTP Server 监听端口 29090...")
-    app.run(host="0.0.0.0", port=29090)
+    
+    # 尝试使用 waitress (生产级 WSGI 服务器)
+    try:
+        from waitress import serve
+        print("✅ 使用 Waitress 生产级服务器启动...")
+        serve(app, host="0.0.0.0", port=29090)
+    except ImportError:
+        print("⚠️ 未安装 waitress，回退到 Flask 开发服务器...")
+        print("建议安装: pip install waitress")
+        app.run(host="0.0.0.0", port=29090)
 
 if __name__ == "__main__":
     main()

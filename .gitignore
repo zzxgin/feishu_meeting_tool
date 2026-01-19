@@ -1,2 +1,7 @@
 .venv/
 downloads/
+.env
+user_tokens.json
+__pycache__/
+*.log
+.DS_Store
