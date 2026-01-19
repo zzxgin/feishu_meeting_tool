@@ -15,8 +15,9 @@ def load_config():
     return {
         "app_id": os.getenv("APP_ID"),
         "app_secret": os.getenv("APP_SECRET"),
-        "encrypt_key": os.getenv("ENCRYPT_KEY", ""),
-        "verification_token": os.getenv("VERIFICATION_TOKEN"),
+        # 不再使用加密 Key
+        "encrypt_key": "", 
+        "verification_token": os.getenv("APP_VERIFICATION_TOKEN", os.getenv("VERIFICATION_TOKEN")),
         "download_path": os.getenv("DOWNLOAD_PATH", "./downloads")
     }
 
@@ -157,7 +158,7 @@ def refresh_user_token_for_user(client, user_id, current_refresh_token):
 
 def download_single_video(object_token, user_id, user_access_token=None, meeting_id=None):
     """
-    下载单个视频，直接使用妙计Token，不需要查会议ID，也不需要其他权限
+    下载单个视频
     """
     config = load_config()
     
@@ -174,6 +175,39 @@ def download_single_video(object_token, user_id, user_access_token=None, meeting
 
     print(f"[处理中] 妙计Token: {object_token} | Owner: {user_id}")
     
+    # --- 1. 获取文件名所需的元数据 (用户+会议名+时间) ---
+    file_name_prefix = object_token # 默认用 token
+    try:
+        if meeting_id:
+            meeting_info = get_meeting_detail(meeting_id, user_access_token)
+            user_info = get_user_info(user_id, user_access_token)
+            
+            # 获取用户姓名
+            user_name = user_id
+            if user_info and user_info.get("code") == 0:
+                # authen/v1/user_info 的返回结构直接在 data 下 (data.name)
+                # 而 contact/v3 是在 data.user.name
+                user_name = user_info.get("data", {}).get("name", user_id)
+            
+            # 获取会议主题和时间
+            if meeting_info and meeting_info.get("code") == 0:
+                m_data = meeting_info.get("data", {}).get("meeting", {})
+                topic = m_data.get("topic", "未命名会议")
+                start_time_ts = int(m_data.get("start_time", 0))
+                
+                # 转换时间戳
+                import time
+                time_str = time.strftime("%Y%m%d_%H%M", time.localtime(start_time_ts))
+                
+                # 组合文件名: 用户名_会议名_时间
+                # 去除非法字符
+                safe_topic = "".join([c for c in topic if c.isalnum() or c in (' ', '-', '_')]).strip()
+                file_name_prefix = f"{user_name}_{safe_topic}_{time_str}"
+                print(f"[文件名构建] {file_name_prefix}")
+    except Exception as e:
+        print(f"[文件名构建失败] 使用默认Token命名. Err: {e}")
+    # -----------------------------------------------------
+
     # 使用妙计媒体 API 获取下载链接（直接用Token，不查会议ID）
     file_url = _get_download_url(object_token, user_access_token)
     
@@ -186,6 +220,10 @@ def download_single_video(object_token, user_id, user_access_token=None, meeting
             if new_at:
                 user_access_token = new_at
                 file_url = _get_download_url(object_token, user_access_token)
+                # 刷新后重新尝试获取元数据（如果之前失败了也没关系，尽力而为）
+                if meeting_id and file_name_prefix == object_token: 
+                     # 这里可以重试获取元数据，但非必须，简化逻辑略过
+                     pass
             else:
                 print("[放弃] Token 刷新失败，无法下载。")
                 return
@@ -203,13 +241,11 @@ def download_single_video(object_token, user_id, user_access_token=None, meeting
     if not os.path.exists(download_dir):
         os.makedirs(download_dir)
 
-    file_path = os.path.join(download_dir, f"{object_token}.mp4")
+    # 最终文件名
+    final_file_name = f"{file_name_prefix}.mp4"
+    file_path = os.path.join(download_dir, final_file_name)
 
-    # 去重检查：如果文件已存在且大小大于0，则认为已下载，保留覆盖逻辑
-    # 您可以根据需求选择：
-    # 策略A (覆盖): 每次都下载覆盖 (适合文件可能更新的场景) -> 删除下面的 if 块
-    # 策略B (跳过): 存在即不下载 (节省带宽) -> 保留下面的 if 块
-    # 当前选择：覆盖 (按照您的要求：直接覆盖)
+    # 去重检查... (略)
     
     print(f"正在下载文件到: {file_path}")
     try:
@@ -221,7 +257,7 @@ def download_single_video(object_token, user_id, user_access_token=None, meeting
         print(f"下载完成: {file_path}")
         
         # 发送通知
-        send_success_notification(user_id, f"{object_token}.mp4")
+        send_success_notification(user_id, final_file_name)
         
     except Exception as e:
         print(f"下载异常: {e}")
@@ -294,3 +330,37 @@ def get_recording_info(meeting_id, user_access_token):
     except Exception as e:
         print(f"[获取录制信息异常] {e}")
         return None
+
+def get_meeting_detail(meeting_id, user_access_token):
+    """
+    获取会议详细信息 (用于生成文件名)
+    """
+    url = f"https://open.feishu.cn/open-apis/vc/v1/meetings/{meeting_id}"
+    headers = {
+        "Authorization": f"Bearer {user_access_token}"
+    }
+    try:
+        resp = requests.get(url, headers=headers)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception as e:
+        print(f"[获取会议详情异常] {e}")
+    return None
+
+def get_user_info(user_id, user_access_token):
+    """
+    获取用户信息 (用于生成文件名)
+    """
+    # 修正：使用 OAuth2/Authen 接口获取当前 Token 用户的基本信息 (包含姓名)
+    url = "https://open.feishu.cn/open-apis/authen/v1/user_info"
+    headers = {
+        "Authorization": f"Bearer {user_access_token}"
+    }
+    try:
+        resp = requests.get(url, headers=headers)
+        if resp.status_code == 200:
+            return resp.json()
+        print(f"[获取用户信息失败] Code: {resp.status_code} Body: {resp.text}")
+    except Exception as e:
+        print(f"[获取用户信息异常] {e}")
+    return None

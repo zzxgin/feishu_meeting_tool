@@ -18,8 +18,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 复制项目代码
 COPY . .
 
-# 创建 downloads 目录
-RUN mkdir -p downloads
+# 创建 downloads 和 user_token 目录
+RUN mkdir -p downloads user_token
 
 # 暴露端口
 EXPOSE 29090

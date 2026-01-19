@@ -11,7 +11,7 @@ from token_manager import token_manager
 
 app = Flask(__name__)
 
-def do_download_task(token, user_id):
+def do_download_task(token, user_id, meeting_id=None):
     """
     具体的下载任务，在独立线程中运行
     """
@@ -27,7 +27,8 @@ def do_download_task(token, user_id):
             return
 
         # 2. 调用 vedio_api 进行下载
-        vedio_api.download_single_video(token, user_id, user_access_token)
+        # 传递 meeting_id 以获取更多元数据生成文件名
+        vedio_api.download_single_video(token, user_id, user_access_token, meeting_id)
         
     except Exception as e:
         print(f"[下载异常] {e}")
@@ -63,7 +64,8 @@ def check_recording_loop(meeting_id, owner_id, attempt=1):
         if match:
              token = match.group(1)
              print(f"[✅ 录制就绪] Token: {token} | 准备下载...")
-             do_download_task(token, owner_id)
+             # 传递 meeting_id
+             do_download_task(token, owner_id, meeting_id)
         return
         
     # 失败则重试
@@ -92,7 +94,7 @@ def do_silence_recording_ready(data: P2VcMeetingRecordingReadyV1) -> None:
 
 def main():
     config = vedio_api.load_config()
-    encrypt_key = config.get('encrypt_key', '')
+    encrypt_key = ""  # 强制关闭加密
     verification_token = config.get('verification_token', '')
 
     # 1. 构造事件 Dispatcher
@@ -123,7 +125,8 @@ def main():
         # 1. minutes:minutes.media:export -> 直接下载妙计音视频文件（核心权限）
         # 2. contact:user.id:readonly -> 获取用户身份
         # 3. vc:record:readonly -> 获取会议录制信息 (用于手动会议)
-        scope = "minutes:minutes.media:export contact:user.id:readonly vc:record:readonly" 
+        # 4. contact:user.base:readonly -> 新增：获取用户基本信息(姓名)
+        scope = "minutes:minutes.media:export contact:user.id:readonly vc:record:readonly contact:user.base:readonly" 
         app_id = config['app_id']
         
         from urllib.parse import quote

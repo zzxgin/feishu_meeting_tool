@@ -3,11 +3,16 @@ import os
 import time
 import threading
 
-TOKEN_FILE = "user_tokens.json"
+# 修改：将 Token 文件存放在 user_token 目录下，方便 Docker 挂载持久化
+DATA_DIR = "user_token"
+TOKEN_FILE = os.path.join(DATA_DIR, "user_tokens.json")
 lock = threading.Lock()
 
 class TokenManager:
     def __init__(self):
+        # 确保 user_token 目录存在
+        if not os.path.exists(DATA_DIR):
+            os.makedirs(DATA_DIR)
         self._ensure_file_exists()
 
     def _ensure_file_exists(self):

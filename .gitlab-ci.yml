@@ -1,6 +1,24 @@
 stages:
+  - test
   - build
   - deploy
+
+# 新增：测试阶段
+# 在这里进行代码语法检查、依赖安装测试。如果有单元测试也在这一步运行。
+unit_test:
+  stage: test
+  tags:
+    - docker
+  image: python:3.9-slim
+  script:
+    - echo "Running code quality & syntax checks..."
+    - pip install --no-cache-dir -r requirements.txt
+    - pip install flake8
+    # 检查严重的语法错误 (E9) 和运行时错误 (F63, F7, F82)
+    - flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+    - echo "✅ Code syntax is good."
+  only:
+    - main
 
 variables:
   # 镜像名称，改为指向 Harbor
@@ -50,14 +68,14 @@ deploy_container:
     - echo "Deploying to server $SERVER_IP..."
     - |
       ssh $SERVER_USER@$SERVER_IP "
-        # 1. 创建数据目录
+        # 1. 创建数据目录 (新增 user_token 目录)
         mkdir -p $HOST_DATA_DIR/downloads
+        mkdir -p $HOST_DATA_DIR/user_token
         
         # 2. 生成环境变量文件 (每次部署重新生成，确保配置最新)
         echo 'APP_ID=$APP_ID' > $HOST_DATA_DIR/.env
         echo 'APP_SECRET=$APP_SECRET' >> $HOST_DATA_DIR/.env
         echo 'APP_VERIFICATION_TOKEN=$APP_VERIFICATION_TOKEN' >> $HOST_DATA_DIR/.env
-        echo 'APP_ENCRYPT_KEY=$APP_ENCRYPT_KEY' >> $HOST_DATA_DIR/.env
         
         # 3. 登录 Harbor (防止 token 过期，每次都登)
         docker login -u '$HARBOR_USER' -p '$HARBOR_PASSWORD' '$HARBOR_URL'
@@ -75,6 +93,7 @@ deploy_container:
           --restart always \
           -p 29090:29090 \
           -v $HOST_DATA_DIR/downloads:/app/downloads \
+          -v $HOST_DATA_DIR/user_token:/app/user_token \
           --env-file $HOST_DATA_DIR/.env \
           $IMAGE_TAG
       "
