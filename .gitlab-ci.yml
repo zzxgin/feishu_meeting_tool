@@ -25,6 +25,9 @@ variables:
   # 注意：DEPLOY_ENV 变量需在 GitLab CI/CD Settings 中注入
   # 不要在此处硬编码默认值，以防止意外覆盖或误导
 
+  # 2. 配置 insecure-registries，跳过 Harbor 证书验证
+  DOCKER_OPTS: "--insecure-registry=$HARBOR_URL"
+
   # 镜像版本号变量。默认为 latest。
   # 你可以在 GitLab CI/CD 启动流水线时注入变量 VERSION (如 v1.0.0) 来指定构建和部署的版本。
   VERSION: "1.0.1"
