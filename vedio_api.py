@@ -343,6 +343,17 @@ def get_meeting_detail(meeting_id, user_access_token):
         resp = requests.get(url, headers=headers)
         if resp.status_code == 200:
             return resp.json()
+
+        # 增加对权限不足的友好提示
+        try:
+             err_body = resp.json()
+             if err_body.get('code') == 99991679:
+                 print(f"❌ [权限不足] 现有 Token 缺少 'vc:meeting:readonly' 权限。")
+                 print(f"👉 请务必重新访问授权页面 (http://<HOST>:29090/auth/start) 并点击授权，以更新 Token 权限。")
+        except Exception:
+             pass
+
+        print(f"[获取会议详情失败] Code: {resp.status_code}, Body: {resp.text}")
     except Exception as e:
         print(f"[获取会议详情异常] {e}")
     return None

@@ -40,6 +40,7 @@
     *   `contact:user.id:readonly`: 获取用户 User ID
     *   `contact:user.base:readonly`: 获取用户姓名 (用于文件名)
     *   `vc:record:readonly`: 获取录制信息
+    *   `vc:meeting:readonly`: 获取会议主题和时间 (用于文件名)
 3.  **事件订阅**:
     *   视频会议 -> 会议结束 (`vc.meeting.all_meeting_ended_v1`)
     *   请求地址配置为: `https://你的域名/webhook/event`

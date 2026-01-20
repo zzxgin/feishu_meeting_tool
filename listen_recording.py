@@ -121,7 +121,8 @@ def main():
         # 2. contact:user.id:readonly -> 获取用户身份
         # 3. vc:record:readonly -> 获取会议录制信息 (用于手动会议)
         # 4. contact:user.base:readonly -> 新增：获取用户基本信息(姓名)
-        scope = "minutes:minutes.media:export contact:user.id:readonly vc:record:readonly contact:user.base:readonly" 
+        # 5. vc:meeting:readonly -> 新增：获取会议详情(主题、时间)
+        scope = "minutes:minutes.media:export contact:user.id:readonly vc:record:readonly contact:user.base:readonly vc:meeting:readonly" 
         app_id = config['app_id']
         
         from urllib.parse import quote
