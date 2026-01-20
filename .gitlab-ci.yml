@@ -24,9 +24,16 @@ variables:
   # 注意：DEPLOY_ENV 变量需在 GitLab CI/CD Settings 中注入
   # 不要在此处硬编码默认值，以防止意外覆盖或误导
 
-  # 镜像名称，改为指向 Harbor
+  # 镜像版本号变量。默认为 latest。
+  # 你可以在 GitLab CI/CD 启动流水线时注入变量 VERSION (如 v1.0.0) 来指定构建和部署的版本。
+  VERSION: "1.0.1"
+
+  # 镜像名称，动态引用上面的 VERSION 变量
   # 组合格式: Harbor地址/项目名/应用名:标签
-  IMAGE_TAG: $HARBOR_URL/$HARBOR_PROJECT/feishu-minute:latest
+  IMAGE_TAG: $HARBOR_URL/$HARBOR_PROJECT/feishu-minute:$VERSION
+  # 始终指向最新的 Latest 标签
+  IMAGE_TAG_LATEST: $HARBOR_URL/$HARBOR_PROJECT/feishu-minute:latest
+
   # 容器运行时的名称
   CONTAINER_NAME: feishu-minute-app
   # 数据挂载目录 (服务器上的目录)
@@ -44,9 +51,11 @@ build_image:
     - echo "Logging in to Harbor..."
     - docker login -u "$HARBOR_USER" -p "$HARBOR_PASSWORD" $HARBOR_URL
     - echo "Building Docker image..."
-    - docker build -t $IMAGE_TAG .
+    # 同时构建 指定版本 和 latest 两个标签
+    - docker build -t $IMAGE_TAG -t $IMAGE_TAG_LATEST .
     - echo "Pushing Docker image..."
     - docker push $IMAGE_TAG
+    - docker push $IMAGE_TAG_LATEST
   only:
     - main
 
