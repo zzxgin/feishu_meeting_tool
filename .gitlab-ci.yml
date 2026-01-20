@@ -48,21 +48,10 @@ build_image:
   image: docker:latest
   services:
     - name: docker:dind
-      command: ["--insecure-registry=${HARBOR_URL}"]
-  variables:
-    DOCKER_TLS_CERTDIR: ""
-  before_script:
-    - until docker info >/dev/null 2>&1; do echo "Waiting for dockerd..."; sleep 2; done
-    - mkdir -p /etc/docker
-    - >
-      cat > /etc/docker/daemon.json << EOF
-      {
-        "insecure-registries": ["${HARBOR_URL}"]
-      }
-      EOF
+      command: ["dockerd", "--host=unix:///var/run/docker.sock", "--host=tcp://0.0.0.0:2375", "--tls=false", "--insecure-registry=harbor.skyrisai.com"]
   script:
     - echo "Logging in to Harbor..."
-    - echo "$HARBOR_PASSWORD" | docker login -u "$HARBOR_USER" --password-stdin $HARBOR_URL
+    - docker login  -u "$HARBOR_USER" -p "$HARBOR_PASSWORD" $HARBOR_URL
     - echo "Building Docker image..."
     # 同时构建 指定版本 和 latest 两个标签
     - docker build -t $IMAGE_TAG -t $IMAGE_TAG_LATEST .
@@ -111,16 +100,6 @@ deploy_container:
         echo 'APP_ID=$APP_ID' >> .env
         echo 'APP_SECRET=$APP_SECRET' >> .env
         echo 'APP_VERIFICATION_TOKEN=$APP_VERIFICATION_TOKEN' >> .env
-        
-        # 新增：配置远程服务器Docker跳过Harbor证书验证（仅新增，未修改原有内容）
-        mkdir -p /etc/docker
-        cat > /etc/docker/daemon.json << EOF
-        {
-          "insecure-registries": ["${HARBOR_URL}"]
-        }
-        EOF
-        systemctl restart docker || true
-        sleep 2
         
         # 登录 Harbor
         docker login -u '$HARBOR_USER' -p '$HARBOR_PASSWORD' '$HARBOR_URL'
