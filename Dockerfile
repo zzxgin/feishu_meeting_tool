@@ -1,5 +1,5 @@
 # 使用官方 Python 轻量级镜像
-FROM registry.cn-hangzhou.aliyuncs.com/aliyuncs/python:3.9-slim
+FROM harbor.skyrisai.com/develop/python:3.9-slim
 
 # 设置工作目录
 WORKDIR /app
