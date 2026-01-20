@@ -17,8 +17,8 @@ unit_test:
     # 检查严重的语法错误 (E9) 和运行时错误 (F63, F7, F82)
     - flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
     - echo "✅ Code syntax is good."
-  only:
-    - main
+  # 移除 'only: main' 限制，让测试在所有分支都运行
+
 
 variables:
   # 注意：DEPLOY_ENV 变量需在 GitLab CI/CD Settings 中注入
@@ -30,7 +30,7 @@ variables:
   # 容器运行时的名称
   CONTAINER_NAME: feishu-minute-app
   # 数据挂载目录 (服务器上的目录)
-  HOST_DATA_DIR: /root/feishu_data
+  HOST_DATA_DIR: /root/feishu_minute
 
 # 构建阶段：构建 Docker 镜像并推送到 Harbor
 build_image:
