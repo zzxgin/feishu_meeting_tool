@@ -69,6 +69,8 @@ deploy_container:
     - chmod 644 ~/.ssh/known_hosts
   script:
     - echo "Deploying to server $SERVER_IP..."
+    # 0. 确保远程目录存在 (修复: 必须先创建目录，否则 scp 会失败)
+    - ssh $SERVER_USER@$SERVER_IP "mkdir -p $HOST_DATA_DIR"
     # 1. 先把 docker-compose.yml 传到服务器
     - scp docker-compose.yml $SERVER_USER@$SERVER_IP:$HOST_DATA_DIR/docker-compose.yml
     # 2. SSH 连上去执行部署命令
