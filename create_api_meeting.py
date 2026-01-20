@@ -15,7 +15,7 @@ def create_meeting_by_no(mobile_or_email):
     print(f"正在查找用户: {mobile_or_email} ...")
     
     # 2. 获取 User ID (需要 Contact 权限: contact:user.id:readonly 或 contact:user:readonly)
-    # 这里尝试通过手机号或邮箱获取 user_id
+    # 这里尝试通过手机号或邮箱获取 user_id。
     user_id = None
     try:
         # 尝试作为手机号查询
