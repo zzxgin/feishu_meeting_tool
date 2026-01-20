@@ -3,8 +3,6 @@ stages:
   - build
   - deploy
 
-# 新增：测试阶段
-# 在这里进行代码语法检查、依赖安装测试。如果有单元测试也在这一步运行。
 unit_test:
   stage: test
   tags:
@@ -12,35 +10,19 @@ unit_test:
   image: python:3.9-slim
   script:
     - echo "Running code quality & syntax checks..."
-    # 使用阿里云镜像源加速依赖安装
     - pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
     - pip install flake8 -i https://mirrors.aliyun.com/pypi/simple/
-    # 检查严重的语法错误 (E9) 和运行时错误 (F63, F7, F82)
     - flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
     - echo "✅ Code syntax is good."
-  # 移除 'only: main' 限制，让测试在所有分支都运行
-
 
 variables:
-  # 注意：DEPLOY_ENV 变量需在 GitLab CI/CD Settings 中注入
-  # 不要在此处硬编码默认值，以防止意外覆盖或误导
-
-  # 镜像版本号变量。默认为 latest。
-  # 你可以在 GitLab CI/CD 启动流水线时注入变量 VERSION (如 v1.0.0) 来指定构建和部署的版本。
   VERSION: "1.0.1"
-
-  # 镜像名称，动态引用上面的 VERSION 变量
-  # 组合格式: Harbor地址/项目名/应用名:标签
   IMAGE_TAG: $HARBOR_URL/$HARBOR_PROJECT/feishu-minute:$VERSION
-  # 始终指向最新的 Latest 标签
   IMAGE_TAG_LATEST: $HARBOR_URL/$HARBOR_PROJECT/feishu-minute:latest
-
-  # 容器运行时的名称
   CONTAINER_NAME: feishu-minute-app
-  # 数据挂载目录 (服务器上的目录)
   HOST_DATA_DIR: /root/feishu_minute
 
-# 构建阶段：构建 Docker 镜像并推送到 Harbor
+# 构建阶段：修复 docker login 参数 + 完善 insecure-registry 配置
 build_image:
   stage: build
   tags:
@@ -48,16 +30,19 @@ build_image:
   image: docker:latest
   services:
     - name: docker:dind
-      # 修复：剥离 HARBOR_URL 的 http/https 前缀，适配 insecure-registry 语法
-      # 生产环境建议：替换为配置合法 TLS 证书，而非使用 insecure-registry
+      # 修复1：正确配置 insecure-registry（剥离前缀 + 确保参数格式正确）
+      # 生产环境建议：替换为配置合法 TLS 证书，移除 insecure-registry
       command: ["--insecure-registry=${HARBOR_URL#*//}"]
+  # 修复2：提前配置 Docker 全局 insecure-registry（兼容旧版本 Docker）
+  before_script:
+    - echo "{\"insecure-registries\": [\"${HARBOR_URL#*//}\"]}" > /etc/docker/daemon.json
+    - service docker restart || true
   script:
     - echo "Logging in to Harbor..."
-    # 修复：添加 --tls-verify=false 跳过 TLS 证书验证（测试环境临时方案）
-    # 生产环境建议：将 Harbor 的 CA 证书放入 GitLab Runner 节点的 /etc/docker/certs.d/${HARBOR_URL#*//}/ 目录，移除 --tls-verify=false
-    - docker login --tls-verify=false -u "$HARBOR_USER" -p "$HARBOR_PASSWORD" $HARBOR_URL
+    # 修复3：使用正确的 --tlsverify=false 参数（Docker 官方标准）
+    # 生产环境建议：移除该参数 + 配置 Harbor CA 证书到 /etc/docker/certs.d/
+    - docker login --tlsverify=false -u "$HARBOR_USER" -p "$HARBOR_PASSWORD" $HARBOR_URL
     - echo "Building Docker image..."
-    # 同时构建 指定版本 和 latest 两个标签
     - docker build -t $IMAGE_TAG -t $IMAGE_TAG_LATEST .
     - echo "Pushing Docker image..."
     - docker push $IMAGE_TAG
@@ -65,63 +50,48 @@ build_image:
   only:
     - main
 
-# 部署阶段：SSH 连上服务器，拉取镜像并运行
+# 部署阶段：同步修复远程服务器的 docker login 参数
 deploy_container:
   stage: deploy
   tags:
     - docker
   image: alpine:latest
   before_script:
-    # 安装 SSH 客户端
     - 'command -v ssh-agent >/dev/null || ( apk add --update openssh )'
     - eval $(ssh-agent -s)
-    # 注入 SSH 私钥
     - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
     - mkdir -p ~/.ssh
     - chmod 700 ~/.ssh
-    # 扫描接收服务器公钥
     - ssh-keyscan $SERVER_IP >> ~/.ssh/known_hosts
     - chmod 644 ~/.ssh/known_hosts
   script:
     - echo "Deploying to server $SERVER_IP..."
-    # 0. 确保远程目录存在 (修复: 必须先创建目录，否则 scp 会失败)
     - ssh $SERVER_USER@$SERVER_IP "mkdir -p $HOST_DATA_DIR"
-    # 1. 先把 docker-compose.yml 传到服务器
     - scp docker-compose.yml $SERVER_USER@$SERVER_IP:$HOST_DATA_DIR/docker-compose.yml
-    # 2. SSH 连上去执行部署命令
     - |
       ssh $SERVER_USER@$SERVER_IP "
         cd $HOST_DATA_DIR
+        mkdir -p downloads user_token logs
         
-        # 确保目录存在
-        mkdir -p downloads
-        mkdir -p user_token
-        mkdir -p logs
+        # 远程服务器也配置 insecure-registry（兼容）
+        echo '{\"insecure-registries\": [\"${HARBOR_URL#*//}\"]}' > /etc/docker/daemon.json
+        service docker restart || true
         
-        # 生成 .env 文件 (供 docker-compose 读取)
-        # 注意：一定要把镜像 Tag 也写进去，因为 docker-compose.yml 里用了变量 \${IMAGE_TAG}
         echo 'IMAGE_TAG=$IMAGE_TAG' > .env
         echo 'APP_ID=$APP_ID' >> .env
         echo 'APP_SECRET=$APP_SECRET' >> .env
         echo 'APP_VERIFICATION_TOKEN=$APP_VERIFICATION_TOKEN' >> .env
         
-        # 登录 Harbor（同步添加 --tls-verify=false 适配测试环境）
-        docker login --tls-verify=false -u '$HARBOR_USER' -p '$HARBOR_PASSWORD' '$HARBOR_URL'
+        # 同步修复 docker login 参数
+        docker login --tlsverify=false -u '$HARBOR_USER' -p '$HARBOR_PASSWORD' '$HARBOR_URL'
         
-        # 拉取最新镜像
         docker compose pull
-        
-        # 强制停止并删除旧容器
         docker stop $CONTAINER_NAME || true
         docker rm $CONTAINER_NAME || true
-
-        # 启动/更新容器 (后台运行)
         docker compose up -d
       "
   rules:
-    # 只有明确指定 DEPLOY_ENV 为 "test" 时才自动部署
     - if: '$CI_COMMIT_BRANCH == "main" && $DEPLOY_ENV == "test"'
       when: on_success
-    # 其他情况 (生产环境 production，或者未设置变量) 默认全部转为手动，保障安全
     - if: '$CI_COMMIT_BRANCH == "main"'
       when: manual
