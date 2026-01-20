@@ -48,13 +48,14 @@ build_image:
   image: docker:latest
   services:
     - name: docker:dind
-      # 显式配置 insecure-registry，解决证书验证失败问题
-      # 如果 HARBOR_URL 包含 http/https 前缀，请确保这里仅使用域名/IP:端口
-      # 但通常 docker dind 能够处理或需要我们自行剥离。这里直接透传尝试。
-      command: ["--insecure-registry=${HARBOR_URL}"]
+      # 修复：剥离 HARBOR_URL 的 http/https 前缀，适配 insecure-registry 语法
+      # 生产环境建议：替换为配置合法 TLS 证书，而非使用 insecure-registry
+      command: ["--insecure-registry=${HARBOR_URL#*//}"]
   script:
     - echo "Logging in to Harbor..."
-    - docker login -u "$HARBOR_USER" -p "$HARBOR_PASSWORD" $HARBOR_URL
+    # 修复：添加 --tls-verify=false 跳过 TLS 证书验证（测试环境临时方案）
+    # 生产环境建议：将 Harbor 的 CA 证书放入 GitLab Runner 节点的 /etc/docker/certs.d/${HARBOR_URL#*//}/ 目录，移除 --tls-verify=false
+    - docker login --tls-verify=false -u "$HARBOR_USER" -p "$HARBOR_PASSWORD" $HARBOR_URL
     - echo "Building Docker image..."
     # 同时构建 指定版本 和 latest 两个标签
     - docker build -t $IMAGE_TAG -t $IMAGE_TAG_LATEST .
@@ -104,8 +105,8 @@ deploy_container:
         echo 'APP_SECRET=$APP_SECRET' >> .env
         echo 'APP_VERIFICATION_TOKEN=$APP_VERIFICATION_TOKEN' >> .env
         
-        # 登录 Harbor
-        docker login -u '$HARBOR_USER' -p '$HARBOR_PASSWORD' '$HARBOR_URL'
+        # 登录 Harbor（同步添加 --tls-verify=false 适配测试环境）
+        docker login --tls-verify=false -u '$HARBOR_USER' -p '$HARBOR_PASSWORD' '$HARBOR_URL'
         
         # 拉取最新镜像
         docker compose pull
