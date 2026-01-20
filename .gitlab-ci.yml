@@ -45,10 +45,9 @@ build_image:
   stage: build
   tags:
     - docker
-  image: docker:latest
-  services:
-    - name: docker:dind
-      entrypoint: ["dockerd", "--insecure-registry=$HARBOR_URL"]
+  image:
+    name: docker:dind
+    entrypoint: ["dockerd", "--insecure-registry=$HARBOR_URL"]
   script:
     - echo "Logging in to Harbor..."
     - docker login -u "$HARBOR_USER" -p "$HARBOR_PASSWORD" $HARBOR_URL
