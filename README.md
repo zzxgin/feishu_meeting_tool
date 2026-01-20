@@ -8,7 +8,7 @@
 项目支持 **Docker 容器化** 及 **GitLab CI/CD** 全自动部署。
 
 ## 核心功能
-*   **📡 自动监听**: 实时响应飞书 `all_meeting_ended` (会议结束) 和 `recording_ready` (录制完成) 事件。
+*   **📡 自动监听**: 实时响应飞书 `all_meeting_ended` (会议结束) 事件，并自动轮询录制状态。
 *   **📥 智能下载**: 自动提取录制 Token，调用妙记 API 高速下载 MP4 视频。
 *   **🏷️ 自动命名**: 下载文件自动重命名为 `姓名_会议主题_时间.mp4` 格式 (如 `张三_周会_20260119_1000.mp4`)。
 *   **📢 消息通知**: 下载完成后，通过飞书卡片发送成功通知给会议的所有者。
@@ -22,6 +22,8 @@
 ├── vedio_api.py          # 核心业务逻辑 (飞书 API 调用, 下载, 文件名解析, 消息发送)
 ├── token_manager.py      # Token 管理模块 (Thread-safe, 自动持久化到 user_token 目录)
 ├── Dockerfile            # 容器构建文件 (基于 python:3.9-slim)
+├── docker-compose.yml    # Docker Compose 服务编排文件
+├── .dockerignore         # Docker 构建忽略清单
 ├── .gitlab-ci.yml        # GitLab CI/CD 流水线配置
 ├── requirements.txt      # Python 依赖清单
 └── .env                  # 环境变量配置文件 (本地开发用)
@@ -40,7 +42,6 @@
     *   `vc:record:readonly`: 获取录制信息
 3.  **事件订阅**:
     *   视频会议 -> 会议结束 (`vc.meeting.all_meeting_ended_v1`)
-    *   视频会议 -> 录制完成 (`vc.meeting.recording_ready_v1`)
     *   请求地址配置为: `https://你的域名/webhook/event`
     *   **加密策略**: 建议关闭 (Encrypt Key 留空)。
 4.  **安全设置**:
@@ -72,13 +73,21 @@ python3 listen_recording.py
 
 ## Docker 部署
 
-### 构建镜像
+我们推荐使用 `docker-compose` 进行更管理化的部署，它可以自动读取 `.env` 并管理挂载目录。
+
+### 1. 启动容器
 ```bash
-docker build -t feishu-minute .
+docker compose up -d
 ```
 
-### 运行容器
+### 2. 停止容器
 ```bash
+docker compose down
+```
+
+如果不使用 Compose (手动模式):
+```bash
+docker build -t feishu-minute .
 docker run -d \
   --name feishu-minute \
   --restart always \
@@ -112,13 +121,19 @@ docker run -d \
 | `SSH_PRIVATE_KEY` | SSH 私钥 (用于 Runner 登录服务器) |
 
 ### 2. 部署流程
-1.  **提交代码**: 包含 `tags: [docker]` 的 Runner 会自动触发流水线。
-2.  **自动构建**: 镜像推送到 Harbor (Tag: `latest`).
-3.  **自动部署**:
-    *   SSH 登录服务器。
-    *   自动创建/更新 `.env` 配置文件 (使用 GitLab Variables)。
-    *   拉取最新镜像。
-    *   停止旧容器，启动新容器 (挂载持久化目录)。
+1.  **提交代码**: 推送代码到 `main` 分支触发流水线。
+2.  **Test 阶段**: 自动进行 `flake8` 代码质量检查和依赖安装测试。
+3.  **Build 阶段**: 使用 `docker:dind` 构建轻量级镜像并推送到 Harbor (Tag: `latest`).
+4.  **Deploy 阶段**:
+    *   将 `docker-compose.yml` 模板发送至服务器。
+    *   将 GitLab Variables 注入并生成 `.env` 配置文件。
+    *   登录 Harbor 拉取最新镜像。
+    *   执行 `docker compose up -d` 平滑更新服务。
+
+## 工程化规范
+*   **.dockerignore**: 已排除 `__pycache__`, `.env`, `.git` 等无关文件，确保镜像小巧安全。
+*   **Docker Compose**: 采用 `docker-compose.yml` 管理服务编排，支持一键启动和持久化挂载配置。
+*   **安全机制**: 敏感配置全流程不落地，仅在部署时通过 CI 注入生产服务器内存/临时文件，不在代码库中明文存储。
 
 ## 注意事项
 1.  **权限发布**: 在飞书开发者后台申请权限后，必须创建并发布新的 **应用版本**，经管理员审核通过后，正式版环境才会生效。

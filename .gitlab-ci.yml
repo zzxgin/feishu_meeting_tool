@@ -66,36 +66,34 @@ deploy_container:
     - chmod 644 ~/.ssh/known_hosts
   script:
     - echo "Deploying to server $SERVER_IP..."
+    # 1. 先把 docker-compose.yml 传到服务器
+    - scp docker-compose.yml $SERVER_USER@$SERVER_IP:$HOST_DATA_DIR/docker-compose.yml
+    # 2. SSH 连上去执行部署命令
     - |
       ssh $SERVER_USER@$SERVER_IP "
-        # 1. 创建数据目录 (新增 user_token 目录)
-        mkdir -p $HOST_DATA_DIR/downloads
-        mkdir -p $HOST_DATA_DIR/user_token
+        cd $HOST_DATA_DIR
         
-        # 2. 生成环境变量文件 (每次部署重新生成，确保配置最新)
-        echo 'APP_ID=$APP_ID' > $HOST_DATA_DIR/.env
-        echo 'APP_SECRET=$APP_SECRET' >> $HOST_DATA_DIR/.env
-        echo 'APP_VERIFICATION_TOKEN=$APP_VERIFICATION_TOKEN' >> $HOST_DATA_DIR/.env
+        # 确保目录存在
+        mkdir -p downloads
+        mkdir -p user_token
         
-        # 3. 登录 Harbor (防止 token 过期，每次都登)
+        # 生成 .env 文件 (供 docker-compose 读取)
+        # 注意：一定要把镜像 Tag 也写进去，因为 docker-compose.yml 里用了变量 \${IMAGE_TAG}
+        echo 'IMAGE_TAG=$IMAGE_TAG' > .env
+        echo 'APP_ID=$APP_ID' >> .env
+        echo 'APP_SECRET=$APP_SECRET' >> .env
+        echo 'APP_VERIFICATION_TOKEN=$APP_VERIFICATION_TOKEN' >> .env
+        
+        # 登录 Harbor
         docker login -u '$HARBOR_USER' -p '$HARBOR_PASSWORD' '$HARBOR_URL'
         
-        # 4. 拉取最新镜像
-        docker pull $IMAGE_TAG
+        # 拉取最新镜像
+        docker compose pull
         
-        # 5. 停止并删除旧容器
-        docker stop $CONTAINER_NAME || true
-        docker rm $CONTAINER_NAME || true
-        
-        # 6. 启动新容器
-        docker run -d \
-          --name $CONTAINER_NAME \
-          --restart always \
-          -p 29090:29090 \
-          -v $HOST_DATA_DIR/downloads:/app/downloads \
-          -v $HOST_DATA_DIR/user_token:/app/user_token \
-          --env-file $HOST_DATA_DIR/.env \
-          $IMAGE_TAG
+        # 启动/更新容器 (后台运行)
+        # down --remove-orphans 是为了清理可能存在的旧配置容器
+        docker compose down --remove-orphans || true
+        docker compose up -d
       "
   only:
     - main

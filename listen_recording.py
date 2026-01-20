@@ -88,10 +88,6 @@ def do_p2_meeting_ended(data: P2VcMeetingAllMeetingEndedV1) -> None:
     except Exception as e:
         print(f"[事件处理错误] {e}")
 
-# 新增：静默处理器，专门用来吞掉 API 会议多余的 recording_ready 事件，防止报错
-def do_silence_recording_ready(data: P2VcMeetingRecordingReadyV1) -> None:
-    pass
-
 def main():
     config = vedio_api.load_config()
     encrypt_key = ""  # 强制关闭加密
@@ -100,7 +96,6 @@ def main():
     # 1. 构造事件 Dispatcher
     handler = lark.EventDispatcherHandler.builder(encrypt_key, verification_token, lark.LogLevel.INFO) \
         .register_p2_vc_meeting_all_meeting_ended_v1(do_p2_meeting_ended) \
-        .register_p2_vc_meeting_recording_ready_v1(do_silence_recording_ready) \
         .build()
 
     # 2. 注册 Flask 路由

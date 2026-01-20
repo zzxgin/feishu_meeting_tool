@@ -2,6 +2,7 @@
 downloads/
 .env
 user_tokens.json
+user_token/
 __pycache__/
 *.log
 .DS_Store
