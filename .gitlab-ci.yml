@@ -95,8 +95,11 @@ deploy_container:
         # 拉取最新镜像
         docker compose pull
         
+        # 强制停止并删除旧容器
+        docker stop $CONTAINER_NAME || true
+        docker rm $CONTAINER_NAME || true
+
         # 启动/更新容器 (后台运行)
-        # down --remove-orphans 是为了清理可能存在的旧配置容器
         docker compose up -d
       "
   rules:
