@@ -48,7 +48,7 @@ build_image:
   image: docker:latest
   services:
     - name: docker:dind
-      command: ["dockerd", "--insecure-registry=$HARBOR_URL"]
+      entrypoint: ["dockerd", "--insecure-registry=$HARBOR_URL"]
   script:
     - echo "Logging in to Harbor..."
     - docker login --insecure -u "$HARBOR_USER" -p "$HARBOR_PASSWORD" $HARBOR_URL
