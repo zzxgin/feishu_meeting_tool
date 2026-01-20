@@ -1,0 +1,30 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Configuration & Secrets (Never copy these to image!)
+.env
+.env.example
+
+# App Data (Local testing data should not go to production image)
+downloads/
+user_token/
+data/
+
+# Docker / CI
+docker-compose.yml
+.gitlab-ci.yml
+Dockerfile
+README.md
