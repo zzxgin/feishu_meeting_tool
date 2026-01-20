@@ -10,6 +10,7 @@ services:
     volumes:
       - ./downloads:/app/downloads
       - ./user_token:/app/user_token
+      - ./logs:/app/logs
       - /etc/localtime:/etc/localtime:ro
     env_file:
       - .env
