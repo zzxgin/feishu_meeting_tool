@@ -13,7 +13,7 @@ COPY requirements.txt .
 
 # 安装依赖
 # --no-cache-dir 减小镜像体积
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
 
 # 复制项目代码
 COPY . .
