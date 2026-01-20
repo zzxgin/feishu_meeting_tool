@@ -39,8 +39,6 @@ variables:
   CONTAINER_NAME: feishu-minute-app
   # 数据挂载目录 (服务器上的目录)
   HOST_DATA_DIR: /root/feishu_minute
-  # 新增：提取纯Harbor仓库地址（剥离http/https前缀）
-  HARBOR_REGISTRY: ${HARBOR_URL#*//}
 
 # 构建阶段：构建 Docker 镜像并推送到 Harbor
 build_image:
@@ -50,18 +48,9 @@ build_image:
   image: docker:latest
   services:
     - name: docker:dind
-      # 修复：剥离 HARBOR_URL 的 http/https 前缀，适配 insecure-registry 语法
-      # 生产环境建议：替换为配置合法 TLS 证书，而非使用 insecure-registry
-      command: ["--insecure-registry=${HARBOR_REGISTRY}"]
-  # 新增：配置Docker客户端insecure-registry（适配新版本Docker，移除tls参数）
-  before_script:
-    - mkdir -p /etc/docker
-    - echo "{\"insecure-registries\": [\"${HARBOR_REGISTRY}\"]}" > /etc/docker/daemon.json
-    - (service docker restart || true) && sleep 2
+      command: ["dockerd", "--insecure-registry=harbor.skyrisai.com"]
   script:
     - echo "Logging in to Harbor..."
-    # 修复：移除所有tls相关参数（新版本Docker已废弃），仅保留基础登录命令
-    # 生产环境建议：将 Harbor 的 CA 证书放入 GitLab Runner 节点的 /etc/docker/certs.d/${HARBOR_REGISTRY}/ 目录
     - docker login -u "$HARBOR_USER" -p "$HARBOR_PASSWORD" $HARBOR_URL
     - echo "Building Docker image..."
     # 同时构建 指定版本 和 latest 两个标签
@@ -104,11 +93,6 @@ deploy_container:
         mkdir -p downloads
         mkdir -p user_token
         mkdir -p logs
-
-        # 新增：远程服务器配置insecure-registry（适配新版本Docker）
-        mkdir -p /etc/docker
-        echo '{\"insecure-registries\": [\"${HARBOR_REGISTRY}\"]}' > /etc/docker/daemon.json
-        (service docker restart || systemctl restart docker || true) && sleep 2
         
         # 生成 .env 文件 (供 docker-compose 读取)
         # 注意：一定要把镜像 Tag 也写进去，因为 docker-compose.yml 里用了变量 \${IMAGE_TAG}
@@ -117,7 +101,7 @@ deploy_container:
         echo 'APP_SECRET=$APP_SECRET' >> .env
         echo 'APP_VERIFICATION_TOKEN=$APP_VERIFICATION_TOKEN' >> .env
         
-        # 修复：移除--tls-verify=false参数，仅保留基础登录命令
+        # 登录 Harbor
         docker login -u '$HARBOR_USER' -p '$HARBOR_PASSWORD' '$HARBOR_URL'
         
         # 拉取最新镜像
