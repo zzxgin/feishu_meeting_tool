@@ -2,6 +2,10 @@ import json
 import os
 import time
 import threading
+import logging
+
+# 获取 Logger
+logger = logging.getLogger(__name__)
 
 # 修改：将 Token 文件存放在 user_token 目录下，方便 Docker 挂载持久化
 DATA_DIR = "user_token"
@@ -29,7 +33,7 @@ class TokenManager:
             tokens[user_id] = token_data
             with open(TOKEN_FILE, "w") as f:
                 json.dump(tokens, f, indent=4)
-            print(f"[TokenManager] 已保存用户 {user_id} 的 Token")
+            logger.info(f"[TokenManager] 已保存用户 {user_id} 的 Token")
 
     def get_user_token(self, user_id):
         """获取用户的 Token，如果不存在返回 None"""

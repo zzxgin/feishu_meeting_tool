@@ -10,6 +10,7 @@ services:
     volumes:
       - ./downloads:/app/downloads
       - ./user_token:/app/user_token
+      - /etc/localtime:/etc/localtime:ro
     env_file:
       - .env
     # 健康检查 (可选，确保服务真正启动)

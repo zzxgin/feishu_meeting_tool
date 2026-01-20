@@ -11,9 +11,9 @@
 *   **📡 自动监听**: 实时响应飞书 `all_meeting_ended` (会议结束) 事件，并自动轮询录制状态。
 *   **📥 智能下载**: 自动提取录制 Token，调用妙记 API 高速下载 MP4 视频。
 *   **🏷️ 自动命名**: 下载文件自动重命名为 `姓名_会议主题_时间.mp4` 格式 (如 `张三_周会_20260119_1000.mp4`)。
-*   **📢 消息通知**: 下载完成后，通过飞书卡片发送成功通知给会议的所有者。
+*   **📢 消息通知**: 下载完成后，通过飞书卡片发送成功通知给会议的所有者。若授权失效，发送红色警告卡片，用户点击授权链接即可一键修复并补录。
 *   **🔐 授权管理**: 提供独立的 OAuth2 授权页面，Token 安全存储并支持自动刷新。
-*   **💾 数据持久化**: 视频文件和用户 Token 数据通过 Docker Volume 持久化存储，重启不丢失。
+*   **💾 数据持久化**: 视频文件、用户 Token 数据及运行日志通过 Docker Volume 持久化存储，重启不丢失。
 
 ## 目录结构
 ```text
@@ -26,7 +26,8 @@
 ├── .dockerignore         # Docker 构建忽略清单
 ├── .gitlab-ci.yml        # GitLab CI/CD 流水线配置
 ├── requirements.txt      # Python 依赖清单
-└── .env                  # 环境变量配置文件 (本地开发用)
+├── .env                  # 环境变量配置文件 (本地开发用)
+└── logs/                 # 运行日志目录 (自动生成)
 ```
 
 ## 快速开始
@@ -95,11 +96,14 @@ docker run -d \
   -p 29090:29090 \
   -v $(pwd)/downloads:/app/downloads \
   -v $(pwd)/user_token:/app/user_token \
+  -v $(pwd)/logs:/app/logs \
+  -v /etc/localtime:/etc/localtime:ro \
   --env-file .env \
   feishu-minute
 ```
 *   `/app/downloads`: 映射本地目录存储视频。
 *   `/app/user_token`: 映射本地目录存储 `user_tokens.json`。
+*   `/etc/localtime`: 挂载宿主机时间，确保日志时间正确。
 
 ## GitLab CI/CD 自动化部署
 
@@ -120,15 +124,20 @@ docker run -d \
 | `SERVER_IP` | 生产服务器 IP |
 | `SERVER_USER` | SSH 登录用户 (通常为 `root`) |
 | `SSH_PRIVATE_KEY` | SSH 私钥 (用于 Runner 登录服务器) |
+| `DEPLOY_ENV` | 部署环境标识 (可选)。设为 `test` 时自动部署，其他情况需手动确认。 |
+| `VERSION` | 镜像版本号 (可选)。设为如 `v1.0.0`，构建时会同时打上该版本标签和 `latest`。 |
 
 ### 2. 部署流程
 1.  **提交代码**: 推送代码到 `main` 分支触发流水线。
-2.  **Test 阶段**: 自动进行 `flake8` 代码质量检查和依赖安装测试。
-3.  **Build 阶段**: 使用 `docker:dind` 构建轻量级镜像并推送到 Harbor (Tag: `latest`).
+2.  **Test 阶段**: 自动进行 `flake8` 代码质量检查和依赖安装测试 (配置了阿里云镜像加速)。
+3.  **Build 阶段**: 
+    *   使用 `docker:dind` 构建轻量级镜像。
+    *   支持**双标签构建**: 同时推送指定版本 (`$VERSION`) 和 `latest` 标签到 Harbor。
 4.  **Deploy 阶段**:
+    *   **安全部署**: 默认采用 **Manual** (手动点击) 模式防止误发生产。仅当 `DEPLOY_ENV=test` 时自动执行。
+    *   自动处理容器命名冲突: 部署前强制停止并删除旧容器。
     *   将 `docker-compose.yml` 模板发送至服务器。
     *   将 GitLab Variables 注入并生成 `.env` 配置文件。
-    *   登录 Harbor 拉取最新镜像。
     *   执行 `docker compose up -d` 平滑更新服务。
 
 ## 工程化规范

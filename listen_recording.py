@@ -2,12 +2,32 @@ import re
 import threading
 import json
 import requests
+import logging
+import logging.handlers
 import lark_oapi as lark
 from lark_oapi.adapter.flask import *
 from lark_oapi.api.vc.v1 import *
 from flask import Flask, request
 import vedio_api
 from token_manager import token_manager
+import os
+
+# 0. 配置日志 (同时输出到文件和控制台)
+# 确保日志目录存在
+log_dir = "logs"
+if not os.path.exists(log_dir):
+    os.makedirs(log_dir)
+
+log_file = os.path.join(log_dir, "app.log")
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.handlers.RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5, encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
@@ -23,7 +43,7 @@ def do_download_task(token, user_id, meeting_id=None):
         if user_data:
             user_access_token = user_data.get("user_access_token")
         else:
-            print(f"[跳过] 用户 {user_id} 未授权")
+            logger.warning(f"[跳过] 用户 {user_id} 未授权")
             return
 
         # 2. 调用 vedio_api 进行下载
@@ -31,22 +51,24 @@ def do_download_task(token, user_id, meeting_id=None):
         vedio_api.download_single_video(token, user_id, user_access_token, meeting_id)
         
     except Exception as e:
-        print(f"[下载异常] {e}")
+        logger.error(f"[下载异常] {e}")
 
 def check_recording_loop(meeting_id, owner_id, attempt=1):
     """
     轮询检查录制是否生成 (适用于手动创建的会议)
     """
     if attempt > 10: # 最多尝试 10 分钟
-        # print(f"[停止轮询] 会议 {meeting_id} 录制未生成或超时") # 可选：静默停止
+        # logger.info(f"[停止轮询] 会议 {meeting_id} 录制未生成或超时") # 可选：静默停止
         return
 
-    # print(f"[轮询检查] 第 {attempt} 次 (Meeting: {meeting_id})") # 保持静默，除非调试
+    # logger.debug(f"[轮询检查] 第 {attempt} 次 (Meeting: {meeting_id})") # 保持静默，除非调试
     
     # 1. Token 检查
     user_data = token_manager.get_user_token(owner_id)
     if not user_data:
-        # 此处不打印，以免未授权用户每次开会都报错
+        # 如果用户未授权，输出错误日志并发送通知卡片
+        logger.error(f"[权限错误] 用户 {owner_id} 的会议 {meeting_id} 已结束，但在系统中找不到该用户的 Token。无法下载。")
+        vedio_api.send_auth_failed_notification(owner_id, meeting_id)
         return
         
     user_token = user_data.get("user_access_token")
@@ -63,13 +85,13 @@ def check_recording_loop(meeting_id, owner_id, attempt=1):
         match = re.search(r'(obcn[a-z0-9]+)', url)
         if match:
              token = match.group(1)
-             print(f"[✅ 录制就绪] Token: {token} | 准备下载...")
+             logger.info(f"[✅ 录制就绪] Token: {token} | 准备下载...")
              # 传递 meeting_id
              do_download_task(token, owner_id, meeting_id)
         return
         
     # 失败则重试
-    # print(f"[等待] 录制尚未准备好，60秒后重试...")
+    # logger.info(f"[等待] 录制尚未准备好，60秒后重试...")
     t = threading.Timer(60.0, check_recording_loop, args=(meeting_id, owner_id, attempt + 1))
     t.start()
 
@@ -79,14 +101,14 @@ def do_p2_meeting_ended(data: P2VcMeetingAllMeetingEndedV1) -> None:
         meeting_id = data.event.meeting.id  
         owner_id = data.event.meeting.owner.id.user_id
         
-        print(f"[事件侦测] 会议结束 (All Meeting Ended) | ID: {meeting_id} | Owner: {owner_id} | 启动查询...")
+        logger.info(f"[事件侦测] 会议结束 (All Meeting Ended) | ID: {meeting_id} | Owner: {owner_id} | 启动查询...")
         
         # 延迟 30秒开始第一次检查
         t = threading.Timer(30.0, check_recording_loop, args=(meeting_id, owner_id))
         t.start()
         
     except Exception as e:
-        print(f"[事件处理错误] {e}")
+        logger.error(f"[事件处理错误] {e}")
 
 def main():
     config = vedio_api.load_config()
@@ -101,7 +123,7 @@ def main():
     # 2. 注册 Flask 路由
     @app.route("/webhook/event", methods=["POST"])
     def event():
-        # print(f"\n[{threading.current_thread().name}] === 收到 HTTP 请求 ===")
+        # logger.debug(f"\n[{threading.current_thread().name}] === 收到 HTTP 请求 ===")
         # 飞书要求返回 200 Keep-Alive，lark-oapi 自动处理
         # 修复：直接返回处理结果，不要重复调用 handler.do()
         return parse_resp(handler.do(parse_req()))
@@ -116,6 +138,11 @@ def main():
             
         redirect_uri = f"{scheme}://{host}/auth/callback"
         
+        # 0. 尝试获取 query 中的 meeting_id（用于补录）
+        meeting_id = request.args.get('meeting_id', '')
+        # 如果有 meeting_id，将其放入 OAuth state 中，格式：meeting_123456
+        state = f"meeting_{meeting_id}" if meeting_id else "init_auth"
+        
         # 权限范围：
         # 1. minutes:minutes.media:export -> 直接下载妙计音视频文件（核心权限）
         # 2. contact:user.id:readonly -> 获取用户身份
@@ -128,7 +155,8 @@ def main():
         from urllib.parse import quote
         encoded_redirect_uri = quote(redirect_uri, safe='')
         
-        url = f"https://open.feishu.cn/open-apis/authen/v1/authorize?app_id={app_id}&redirect_uri={encoded_redirect_uri}&scope={scope}&state=RANDOMSTATE"
+        # 将 state 传入 OAuth URL
+        url = f"https://open.feishu.cn/open-apis/authen/v1/authorize?app_id={app_id}&redirect_uri={encoded_redirect_uri}&scope={scope}&state={state}"
         return f'''
         <div style="text-align:center; margin-top: 50px;">
             <h1>Feishu Auto-Downloader Authorization</h1>
@@ -142,6 +170,8 @@ def main():
     @app.route("/auth/callback", methods=["GET"])
     def auth_callback():
         code = request.args.get("code")
+        state = request.args.get("state", "")
+        
         if not code:
             return "Missing code", 400
         
@@ -194,32 +224,46 @@ def main():
                 "name": name
             }
             token_manager.save_user_token(user_id, token_data)
-                
+            
+            # 4. 检查是否需要补录 (如果 state 包含 meeting_id)
+            remedy_info = ""
+            if state and state.startswith("meeting_"):
+                # 提取会议ID
+                missed_meeting_id = state.replace("meeting_", "")
+                if missed_meeting_id:
+                     logger.info(f"[补录逻辑] 检测到授权补录请求，会议ID: {missed_meeting_id}")
+                     # 启动补录线程
+                     # 注意：check_recording_loop 内部有重试机制，很适合这里
+                     t = threading.Thread(target=check_recording_loop, args=(missed_meeting_id, user_id))
+                     t.start()
+                     remedy_info = f"<p style='color: blue'>🔁 正在尝试为你补下载刚才错过的会议 ({missed_meeting_id})，请留意飞书通知。</p>"
+
             return f"""
             <div style="text-align:center; margin-top: 50px;">
                 <h1 style="color:green">✅ 授权成功!</h1>
                 <p>你好，<b>{name}</b> (ID: {user_id})</p>
                 <p>你的 Token 已保存。今后你的会议录制结束后，机器人将自动为你下载。</p>
+                {remedy_info}
             </div>
             """
 
         except Exception as e:
-            print(f"[Auth Callback Error] {e}")
+            logger.error(f"[Auth Callback Error] {e}")
             return f"❌ 内部异常: {str(e)}"
 
     # 区分开发环境和生产环境
     # 如果是本地调试，直接运行 main() 则使用 Flask 自带服务器
     # 如果是生产环境，通常通过 python listen_recording.py 运行，但也推荐用 waitress
-    print(f"启动 HTTP Server 监听端口 29090...")
+    logger.info(f"启动 HTTP Server 监听端口 29090...")
     
     # 尝试使用 waitress (生产级 WSGI 服务器)
     try:
         from waitress import serve
-        print("✅ 使用 Waitress 生产级服务器启动...")
+        logger.info("✅ 使用 Waitress 生产级服务器启动...")
         serve(app, host="0.0.0.0", port=29090)
     except ImportError:
-        print("⚠️ 未安装 waitress，回退到 Flask 开发服务器...")
-        print("建议安装: pip install waitress")
+        logger.warning("⚠️ 未安装 waitress，回退到 Flask 开发服务器...")
+        logger.warning("建议安装: pip install waitress")
         app.run(host="0.0.0.0", port=29090)
 
 if __name__ == "__main__":
