@@ -1,0 +1,6 @@
+flask
+requests
+lark-oapi
+pycryptodome
+python-dotenv
+waitress

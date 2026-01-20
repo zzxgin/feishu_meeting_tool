@@ -1,93 +1,141 @@
-# feishu_minute
+# 飞书妙记自动下载助手 (Feishu Meeting Auto-Downloader)
 
+## 项目简介
+这是一个基于 Python Flask + Waitress 开发的自动化工具，旨在解决飞书/Lark 会议录制文件的自动归档问题。
 
+当会议结束或录制生成时，本服务会自动接收飞书事件回调，使用用户的授权 Token 下载妙记音视频文件，并将其重命名为易读格式（姓名+会议名+时间），最后通过飞书卡片通知用户。
 
-## Getting started
+项目支持 **Docker 容器化** 及 **GitLab CI/CD** 全自动部署。
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## 核心功能
+*   **📡 自动监听**: 实时响应飞书 `all_meeting_ended` (会议结束) 事件，并自动轮询录制状态。
+*   **📥 智能下载**: 自动提取录制 Token，调用妙记 API 高速下载 MP4 视频。
+*   **🏷️ 自动命名**: 下载文件自动重命名为 `姓名_会议主题_时间.mp4` 格式 (如 `张三_周会_20260119_1000.mp4`)。
+*   **📢 消息通知**: 下载完成后，通过飞书卡片发送成功通知给会议的所有者。
+*   **🔐 授权管理**: 提供独立的 OAuth2 授权页面，Token 安全存储并支持自动刷新。
+*   **💾 数据持久化**: 视频文件和用户 Token 数据通过 Docker Volume 持久化存储，重启不丢失。
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
-
+## 目录结构
+```text
+.
+├── listen_recording.py   # 主程序入口 (HTTP Server, 路由处理, 事件分发)
+├── vedio_api.py          # 核心业务逻辑 (飞书 API 调用, 下载, 文件名解析, 消息发送)
+├── token_manager.py      # Token 管理模块 (Thread-safe, 自动持久化到 user_token 目录)
+├── Dockerfile            # 容器构建文件 (基于 python:3.9-slim)
+├── docker-compose.yml    # Docker Compose 服务编排文件
+├── .dockerignore         # Docker 构建忽略清单
+├── .gitlab-ci.yml        # GitLab CI/CD 流水线配置
+├── requirements.txt      # Python 依赖清单
+└── .env                  # 环境变量配置文件 (本地开发用)
 ```
-cd existing_repo
-git remote add origin https://git.skyrisai.com/origin/tech/tools/feishu_minute.git
-git branch -M main
-git push -uf origin main
+
+## 快速开始
+
+### 1. 飞书开放平台配置
+在 [飞书开发者后台](https://open.feishu.cn/app) 创建企业自建应用，并配置：
+
+1.  **开启机器人能力**。
+2.  **权限管理 (Scopes)**:
+    *   `minutes:minutes.media:export`: 导出和下载妙记 (核心)
+    *   `contact:user.id:readonly`: 获取用户 User ID
+    *   `contact:user.base:readonly`: 获取用户姓名 (用于文件名)
+    *   `vc:record:readonly`: 获取录制信息
+    *   `vc:meeting:readonly`: 获取会议主题和时间 (用于文件名)
+3.  **事件订阅**:
+    *   视频会议 -> 会议结束 (`vc.meeting.all_meeting_ended_v1`)
+    *   请求地址配置为: `https://你的域名/webhook/event`
+    *   **加密策略**: 建议关闭 (Encrypt Key 留空)。
+4.  **安全设置**:
+    *   重定向 URL 添加: `https://你的域名/auth/callback`
+
+### 2. 环境变量配置
+复制 `.env.example` 为 `.env`，并填入你的应用信息：
+```env
+APP_ID=cli_xxxxxxxxxxxx
+APP_SECRET=xxxxxxxxxxxxxxxxxxxxxxxx
+APP_VERIFICATION_TOKEN=xxxxxxxxxxxxxxxx
+# APP_ENCRYPT_KEY=  <-- 建议注释掉或留空
+DOWNLOAD_PATH=./downloads
 ```
 
-## Integrate with your tools
+### 3. 本地运行
+```bash
+# 1. 安装依赖
+pip3 install -r requirements.txt
 
-- [ ] [Set up project integrations](https://git.skyrisai.com/origin/tech/tools/feishu_minute/-/settings/integrations)
+# 2. 启动服务 (自动选择 Waitress 生产服务器或 Flask 开发服务器)
+python3 listen_recording.py
+```
+服务默认监听端口: `29090`。
 
-## Collaborate with your team
+### 4. 用户授权
+服务启动后，用户需进行一次性授权：
+访问 `http://localhost:29090/auth/start` (或你的生产域名)，点击“授权开启”。
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+## Docker 部署
 
-## Test and Deploy
+我们推荐使用 `docker-compose` 进行更管理化的部署，它可以自动读取 `.env` 并管理挂载目录。
 
-Use the built-in continuous integration in GitLab.
+### 1. 启动容器
+```bash
+docker compose up -d
+```
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+### 2. 停止容器
+```bash
+docker compose down
+```
 
-***
+如果不使用 Compose (手动模式):
+```bash
+docker build -t feishu-minute .
+docker run -d \
+  --name feishu-minute \
+  --restart always \
+  -p 29090:29090 \
+  -v $(pwd)/downloads:/app/downloads \
+  -v $(pwd)/user_token:/app/user_token \
+  --env-file .env \
+  feishu-minute
+```
+*   `/app/downloads`: 映射本地目录存储视频。
+*   `/app/user_token`: 映射本地目录存储 `user_tokens.json`。
 
-# Editing this README
+## GitLab CI/CD 自动化部署
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+本项目已配置完整的 CI/CD 流程 (Test -> Build -> Deploy)，适配 **Harbor 镜像仓库** 和 **SSH 远程部署**。
 
-## Suggestions for a good README
+### 1. GitLab Variables 配置
+在 GitLab 项目 -> Settings -> CI/CD -> Variables 中添加：
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+| 变量名 | 说明 |
+| :--- | :--- |
+| `APP_ID` | 飞书 App ID |
+| `APP_SECRET` | 飞书 App Secret |
+| `APP_VERIFICATION_TOKEN` | 飞书 Verification Token |
+| `HARBOR_URL` | Harbor 仓库地址 (如 `harbor.example.com`) |
+| `HARBOR_USER` | Harbor 用户名 |
+| `HARBOR_PASSWORD` | Harbor 密码 |
+| `HARBOR_PROJECT` | Harbor 项目名 |
+| `SERVER_IP` | 生产服务器 IP |
+| `SERVER_USER` | SSH 登录用户 (通常为 `root`) |
+| `SSH_PRIVATE_KEY` | SSH 私钥 (用于 Runner 登录服务器) |
 
-## Name
-Choose a self-explaining name for your project.
+### 2. 部署流程
+1.  **提交代码**: 推送代码到 `main` 分支触发流水线。
+2.  **Test 阶段**: 自动进行 `flake8` 代码质量检查和依赖安装测试。
+3.  **Build 阶段**: 使用 `docker:dind` 构建轻量级镜像并推送到 Harbor (Tag: `latest`).
+4.  **Deploy 阶段**:
+    *   将 `docker-compose.yml` 模板发送至服务器。
+    *   将 GitLab Variables 注入并生成 `.env` 配置文件。
+    *   登录 Harbor 拉取最新镜像。
+    *   执行 `docker compose up -d` 平滑更新服务。
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+## 工程化规范
+*   **.dockerignore**: 已排除 `__pycache__`, `.env`, `.git` 等无关文件，确保镜像小巧安全。
+*   **Docker Compose**: 采用 `docker-compose.yml` 管理服务编排，支持一键启动和持久化挂载配置。
+*   **安全机制**: 敏感配置全流程不落地，仅在部署时通过 CI 注入生产服务器内存/临时文件，不在代码库中明文存储。
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+## 注意事项
+1.  **权限发布**: 在飞书开发者后台申请权限后，必须创建并发布新的 **应用版本**，经管理员审核通过后，正式版环境才会生效。
+2.  **挑战验证**: 首次配置飞书请求地址时，需确保服务已启动且能访问。如果飞书报错 "Challenge code没有返回"，请检查是否错误配置了 Encrypt Key。
