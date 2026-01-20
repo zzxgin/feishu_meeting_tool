@@ -382,22 +382,55 @@ def _get_download_url(object_token, access_token):
     
     return None
 
-def get_recording_info(meeting_id, user_access_token):
+def get_recording_info(meeting_id, user_access_token, user_id=None):
     """
     通过 user_access_token 查询会议录制信息
     权限要求: vc:record:readonly
+    增加了 Token 自动刷新机制
     """
     url = f"https://open.feishu.cn/open-apis/vc/v1/meetings/{meeting_id}/recording"
-    headers = {
-        "Authorization": f"Bearer {user_access_token}"
-    }
+    
+    def _do_request(token):
+        headers = { "Authorization": f"Bearer {token}" }
+        return requests.get(url, headers=headers)
+
     try:
-        resp = requests.get(url, headers=headers)
+        resp = _do_request(user_access_token)
+        
+        # 处理 Token 过期 (401 或 特定错误码)
+        if resp.status_code == 401 or (resp.json().get('code') == 99991677):
+            logger.warning(f"[API授权过期] 尝试刷新用户 {user_id} 的 Token...")
+            if user_id:
+                # 获取当前的 Refresh Token
+                saved_data = token_manager.get_user_token(user_id)
+                if saved_data and saved_data.get("refresh_token"):
+                    # 构建 Client (临时)
+                    config = load_config()
+                    client = lark.Client.builder().app_id(config.get("app_id")).app_secret(config.get("app_secret")).build()
+                    
+                    # 刷新
+                    new_at, _ = refresh_user_token_for_user(client, user_id, saved_data["refresh_token"])
+                    if new_at:
+                        logger.info("[重试] 使用新 Token 重试 API 请求...")
+                        resp = _do_request(new_at)
+                    else:
+                        logger.error("[刷新失败] 无法获取新 Token")
+                        # 触发授权失效通知
+                        send_auth_failed_notification(user_id, meeting_id)
+                else:
+                    logger.error("[刷新失败] 未找到 Refresh Token")
+                    send_auth_failed_notification(user_id, meeting_id)
+            else:
+                 logger.error("[刷新失败] 未提供 user_id，无法执行刷新")
+
         if resp.status_code == 200:
             return resp.json()
         else:
             logger.error(f"[获取录制信息失败] Status: {resp.status_code}, Body: {resp.text}")
             return None
+    except Exception as e:
+        logger.error(f"[API请求异常] {e}")
+        return None
     except Exception as e:
         logger.error(f"[获取录制信息异常] {e}")
         return None

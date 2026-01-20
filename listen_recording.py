@@ -74,7 +74,8 @@ def check_recording_loop(meeting_id, owner_id, attempt=1):
     user_token = user_data.get("user_access_token")
     
     # 2. 调用 API 查询 (需 vc:recording:readonly 权限)
-    res = vedio_api.get_recording_info(meeting_id, user_token)
+    # 传递 owner_id 以支持自动 Token 刷新
+    res = vedio_api.get_recording_info(meeting_id, user_token, user_id=owner_id)
     
     # 3. 结果判断
     # 成功拿到 url
