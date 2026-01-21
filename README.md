@@ -17,17 +17,25 @@
 
 ## 目录结构
 ```text
-.
-├── listen_recording.py   # 主程序入口 (HTTP Server, 路由处理, 事件分发)
-├── vedio_api.py          # 核心业务逻辑 (飞书 API 调用, 下载, 文件名解析, 消息发送)
-├── token_manager.py      # Token 管理模块 (Thread-safe, 自动持久化到 user_token 目录)
-├── Dockerfile            # 容器构建文件 (基于 python:3.9-slim)
-├── docker-compose.yml    # Docker Compose 服务编排文件
-├── .dockerignore         # Docker 构建忽略清单
-├── .gitlab-ci.yml        # GitLab CI/CD 流水线配置
-├── requirements.txt      # Python 依赖清单
-├── .env                  # 环境变量配置文件 (本地开发用)
-└── logs/                 # 运行日志目录 (自动生成)
+feishu_minute/
+├── app/                  # [核心代码包]
+│   ├── __init__.py       # Flask 应用工厂函数
+│   ├── api/              # [API 层] Web 接口与路由
+│   │   ├── routes.py     # 授权与回调路由
+│   │   └── event_handler.py # 事件处理逻辑
+│   ├── core/             # [业务逻辑层] 
+│   │   ├── downloader.py # 视频下载核心 (含防重、原子写入)
+│   │   ├── meeting_service.py # 飞书 API 业务调用
+│   │   └── notification.py # 飞书卡片构建与发送
+│   ├── data/             # [数据访问层]
+│   │   └── token_store.py # Token 持久化存储
+│   └── utils/            # [工具层] 配置、日志、异常
+├── run.py                # [启动入口] 程序启动文件
+├── Dockerfile            # 容器构建文件
+├── docker-compose.yml    # Docker 编排配置
+├── config.json           # 飞书应用配置文件
+├── .gitlab-ci.yml        # CI/CD 流水线配置
+└── requirements.txt      # Python 依赖
 ```
 
 ## 快速开始
@@ -65,7 +73,7 @@ DOWNLOAD_PATH=./downloads
 pip3 install -r requirements.txt
 
 # 2. 启动服务 (自动选择 Waitress 生产服务器或 Flask 开发服务器)
-python3 listen_recording.py
+python3 run.py
 ```
 服务默认监听端口: `29090`。
 
@@ -141,6 +149,7 @@ docker run -d \
     *   执行 `docker compose up -d` 平滑更新服务。
 
 ## 工程化规范
+*   **Atomic Write**: 下载时先写入 `.temp` 文件，校验通过后才重命名为 `.mp4`，防止网络中断产生损坏文件。
 *   **.dockerignore**: 已排除 `__pycache__`, `.env`, `.git` 等无关文件，确保镜像小巧安全。
 *   **Docker Compose**: 采用 `docker-compose.yml` 管理服务编排，支持一键启动和持久化挂载配置。
 *   **安全机制**: 敏感配置全流程不落地，仅在部署时通过 CI 注入生产服务器内存/临时文件，不在代码库中明文存储。

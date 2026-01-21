@@ -1,0 +1,169 @@
+import os
+import requests
+import lark_oapi as lark
+from app.utils.logger import logger
+from app.utils.config import load_config
+from app.data.token_store import token_store
+from app.core.notification import send_auth_failed_notification, send_success_notification
+from app.core.meeting_service import get_meeting_detail, get_user_info, refresh_user_token_for_user
+
+def _get_download_url(object_token, access_token):
+    """
+    使用妙计媒体 API 直接获取下载链接
+    API: GET /open-apis/minutes/v1/minutes/:minute_token/media
+    接口权限: minutes:minutes.media:export (下载妙记的音视频文件)
+    返回: url 字符串, 或者 "RenewToken", 或者 None
+    """
+    url = f"https://open.feishu.cn/open-apis/minutes/v1/minutes/{object_token}/media"
+    headers = {
+        "Authorization": f"Bearer {access_token}"
+    }
+    
+    try:
+        resp = requests.get(url, headers=headers)
+        
+        # 处理 Token 过期的情况
+        if resp.status_code == 401:
+             return "RenewToken"
+            
+        data = resp.json()
+        logger.debug(f"[API返回调试] Code: {data.get('code')} | Msg: {data.get('msg')} | Data Keys: {list(data.get('data', {}).keys()) if data.get('data') else 'None'}")
+        
+        if data.get("code") == 0:
+            # 兼容：有时返回 download_url (文档未写明但实际返回这个)
+            # 有时返回 data.video.url
+            # 有时返回 data.url
+            
+            # 1. 尝试直接获取 download_url (本次调试发现的)
+            download_url = data.get("data", {}).get("download_url")
+            if download_url:
+                return download_url
+            
+            # 2. 尝试获取 video url
+            video_url = data.get("data", {}).get("video", {}).get("url")
+            if video_url:
+                return video_url
+            
+            # 3. 尝试直接获取 url
+            media_url = data.get("data", {}).get("url")
+            if media_url:
+                return media_url
+        else:
+            logger.error(f"[妙计API错误] {data.get('msg')} (Code: {data.get('code')})")
+            
+    except Exception as e:
+        logger.error(f"[请求异常] {e}")
+    
+    return None
+
+def download_single_video(object_token, user_id, user_access_token=None, meeting_id=None):
+    """
+    下载单个视频
+    """
+    config = load_config()
+    
+    # 如果没有传 Token（比如还没登录），就无法下载私有视频
+    if not user_access_token:
+        logger.error(f"[错误] 缺少 User Token，无法下载用户 {user_id} 的视频")
+        return
+
+    # 创建 API Client (用于刷新 Token - 虽然我们现在不用 SDK client 刷新了，但保留 config 逻辑)
+    # 真正刷新用的是 http request
+
+    logger.info(f"[处理中] 妙计Token: {object_token} | Owner: {user_id}")
+    
+    # --- 1. 获取文件名所需的元数据 (用户+会议名+时间) ---
+    file_name_prefix = object_token # 默认用 token
+    try:
+        if meeting_id:
+            meeting_info = get_meeting_detail(meeting_id, user_access_token)
+            user_info = get_user_info(user_id, user_access_token)
+            
+            # 获取用户姓名
+            user_name = user_id
+            if user_info and user_info.get("code") == 0:
+                user_name = user_info.get("data", {}).get("name", user_id)
+            
+            # 获取会议主题和时间
+            if meeting_info and meeting_info.get("code") == 0:
+                m_data = meeting_info.get("data", {}).get("meeting", {})
+                topic = m_data.get("topic", "未命名会议")
+                start_time_ts = int(m_data.get("start_time", 0))
+                
+                # 转换时间戳
+                import time
+                time_str = time.strftime("%Y%m%d_%H%M", time.localtime(start_time_ts))
+                
+                # 组合文件名: 用户名_会议名_时间
+                # 去除非法字符
+                safe_topic = "".join([c for c in topic if c.isalnum() or c in (' ', '-', '_')]).strip()
+                file_name_prefix = f"{user_name}_{safe_topic}_{time_str}"
+                logger.debug(f"[文件名构建] {file_name_prefix}")
+    except Exception as e:
+        logger.warning(f"[文件名构建失败] 使用默认Token命名. Err: {e}")
+    # -----------------------------------------------------
+
+    # 使用妙计媒体 API 获取下载链接（直接用Token，不查会议ID）
+    file_url = _get_download_url(object_token, user_access_token)
+    
+    # 如果Token过期，尝试刷新
+    if file_url == "RenewToken":
+        logger.info("[Token过期] 尝试刷新 Token...")
+        saved_data = token_store.get_user_token(user_id)
+        if saved_data and saved_data.get("refresh_token"):
+            new_at, new_rt = refresh_user_token_for_user(user_id, saved_data["refresh_token"])
+            if new_at:
+                user_access_token = new_at
+                file_url = _get_download_url(object_token, user_access_token)
+            else:
+                logger.error("[放弃] Token 刷新失败，无法下载。")
+                send_auth_failed_notification(user_id, meeting_id)
+                return
+        else:
+            logger.error("[放弃] 找不到 Refresh Token，无法下载。")
+            send_auth_failed_notification(user_id, meeting_id)
+            return
+    
+    logger.debug(f"[调试] 获取到下载链接: {file_url}")
+    if not file_url:
+        logger.error(">>> 无法获取下载链接，跳过。")
+        return
+
+    # 下载文件
+    download_dir = config.get("download_path", "./downloads")
+    if not os.path.exists(download_dir):
+        os.makedirs(download_dir)
+
+    # 最终文件名
+    final_file_name = f"{file_name_prefix}.mp4"
+    file_path = os.path.join(download_dir, final_file_name)
+
+    # 去重检查: 如果文件已存在 (且大小 > 0)，则视为下载成功，不做重复下载
+    if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+        logger.info(f"[跳过下载] 文件已存在: {file_path}")
+        send_success_notification(user_id, final_file_name)
+        return
+
+    logger.info(f"正在下载文件到: {file_path}")
+    try:
+        # 使用临时文件下载，防止中断导致残留不完整文件
+        temp_file_path = file_path + ".downloading"
+        with requests.get(file_url, stream=True) as r:
+            r.raise_for_status()
+            with open(temp_file_path, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+        
+        # 下载完成后重命名
+        os.rename(temp_file_path, file_path)
+        logger.info(f"下载完成: {file_path}")
+        
+        # 发送通知
+        send_success_notification(user_id, final_file_name)
+        
+    except Exception as e:
+        logger.error(f"下载异常: {e}")
+        # 清理可能的临时文件
+        if os.path.exists(temp_file_path):
+             try: os.remove(temp_file_path)
+             except: pass

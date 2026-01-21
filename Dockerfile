@@ -25,4 +25,4 @@ RUN mkdir -p downloads user_token
 EXPOSE 29090
 
 # 启动命令 (使用 waitress)
-CMD ["python", "listen_recording.py"]
+CMD ["python", "run.py"]

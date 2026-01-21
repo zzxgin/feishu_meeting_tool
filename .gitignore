@@ -4,6 +4,7 @@ downloads/
 user_tokens.json
 user_token/
 __pycache__/
+app/**/__pycache__/
 *.log
 logs/
 .DS_Store
