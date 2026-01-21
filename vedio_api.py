@@ -333,15 +333,24 @@ def download_single_video(object_token, user_id, user_access_token=None, meeting
     final_file_name = f"{file_name_prefix}.mp4"
     file_path = os.path.join(download_dir, final_file_name)
 
-    # 去重检查... (略)
-    
+    # 去重检查: 如果文件已存在 (且大小 > 0)，则视为下载成功，不做重复下载
+    if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+        logger.info(f"[跳过下载] 文件已存在: {file_path}")
+        send_success_notification(user_id, final_file_name)
+        return
+
     logger.info(f"正在下载文件到: {file_path}")
     try:
+        # 使用临时文件下载，防止中断导致残留不完整文件
+        temp_file_path = file_path + ".downloading"
         with requests.get(file_url, stream=True) as r:
             r.raise_for_status()
-            with open(file_path, 'wb') as f:
+            with open(temp_file_path, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
+        
+        # 下载完成后重命名
+        os.rename(temp_file_path, file_path)
         logger.info(f"下载完成: {file_path}")
         
         # 发送通知
@@ -349,6 +358,10 @@ def download_single_video(object_token, user_id, user_access_token=None, meeting
         
     except Exception as e:
         logger.error(f"下载异常: {e}")
+        # 清理可能的临时文件
+        if os.path.exists(temp_file_path):
+             try: os.remove(temp_file_path)
+             except: pass
 
 def _get_download_url(object_token, access_token):
     """
