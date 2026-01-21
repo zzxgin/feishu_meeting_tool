@@ -188,43 +188,60 @@ def send_auth_failed_notification(user_id, meeting_id=None):
 def refresh_user_token_for_user(client, user_id, current_refresh_token):
     """
     专门为指定用户刷新 Token
+    (改用原生 HTTP 请求以避免 SDK 版本兼容性问题)
     """
     logger.info(f"--- [Token刷新] 正在为用户 {user_id} 刷新 Token... ---")
     
-    # 构建请求
-    req = lark.api.authen.v1.RefreshAccessTokenReq.builder() \
-        .body(lark.api.authen.v1.RefreshAccessTokenReqBody.builder()
-            .grant_type("refresh_token")
-            .refresh_token(current_refresh_token)
-            .build()) \
-        .build()
-
-    # 发起请求
-    try:
-        resp = client.authen.v1.access_token.refresh(req)
-    except Exception as e:
-        logger.error(f"--- [Token刷新异常] {e} ---")
+    # 1. 获取 Tenant Access Token (接口调用凭证)
+    tenant_token = get_tenant_access_token()
+    if not tenant_token:
+        logger.error("--- [Token刷新失败] 无法获取 Tenant Access Token ---")
         return None, None
 
-    if not resp.success():
-        logger.error(f"--- [Token刷新失败] {resp.code}, {resp.msg}, log_id: {resp.get_log_id()} ---")
-        return None, None
-
-    # 解析结果
-    new_access_token = resp.data.access_token
-    new_refresh_token = resp.data.refresh_token
-    expires_in = resp.data.expires_in
-    
-    # 保存到 TokenManager
-    token_data = {
-        "user_access_token": new_access_token,
-        "refresh_token": new_refresh_token,
-        "expires_in": expires_in
+    # 2. 调用刷新接口
+    url = "https://open.feishu.cn/open-apis/authen/v1/refresh_access_token"
+    headers = {
+        "Authorization": f"Bearer {tenant_token}",
+        "Content-Type": "application/json; charset=utf-8"
     }
-    token_manager.save_user_token(user_id, token_data)
-    
-    logger.info(f"--- [Token刷新成功] 用户 {user_id} Token 已更新 ---")
-    return new_access_token, new_refresh_token
+    body = {
+        "grant_type": "refresh_token",
+        "refresh_token": current_refresh_token
+    }
+
+    try:
+        resp = requests.post(url, headers=headers, json=body)
+        data = resp.json()
+        
+        if data.get("code") != 0:
+            logger.error(f"--- [Token刷新失败] Code: {data.get('code')}, Msg: {data.get('msg')} ---")
+            return None, None
+            
+        # 3. 解析结果
+        # 注意: 飞书返回的数据结构在 data 字段下
+        resp_data = data.get("data", {})
+        new_access_token = resp_data.get("access_token")
+        new_refresh_token = resp_data.get("refresh_token")
+        expires_in = resp_data.get("expires_in")
+        
+        if not new_access_token:
+             logger.error(f"--- [Token刷新异常] 响应中缺少 access_token: {data} ---")
+             return None, None
+
+        # 4. 保存到 TokenManager
+        token_data = {
+            "user_access_token": new_access_token,
+            "refresh_token": new_refresh_token,
+            "expires_in": expires_in
+        }
+        token_manager.save_user_token(user_id, token_data)
+        
+        logger.info(f"--- [Token刷新成功] 用户 {user_id} Token 已更新 ---")
+        return new_access_token, new_refresh_token
+
+    except Exception as e:
+        logger.error(f"--- [Token刷新请求异常] {e} ---")
+        return None, None
 
 def download_single_video(object_token, user_id, user_access_token=None, meeting_id=None):
     """
