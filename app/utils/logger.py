@@ -24,6 +24,9 @@ def setup_logger(name=__name__):
         
         logger.addHandler(file_handler)
         logger.addHandler(stream_handler)
+
+        # 禁止日志传播到 Root Logger，防止控制台出现重复日志
+        logger.propagate = False
         
     return logger
 
