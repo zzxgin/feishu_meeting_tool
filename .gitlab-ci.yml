@@ -38,7 +38,7 @@ variables:
   # 容器运行时的名称
   CONTAINER_NAME: feishu-minute-app
   # 数据挂载目录 (服务器上的目录)
-  HOST_DATA_DIR: /root/feishu_minute
+  HOST_DATA_DIR: /vol1/feishu_minute
 
 # 构建阶段：构建 Docker 镜像并推送到 Harbor
 build_image:

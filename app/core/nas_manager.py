@@ -97,6 +97,36 @@ class NasManager:
 
         return None
 
+    @staticmethod
+    def save_to_team_folder(source_file_path, department_names):
+        """
+        将文件复制到团队文件夹
+        :param source_file_path: 源文件路径 (已下载的视频文件)
+        :param department_names: 部门名称列表 ["Skyris技术部门", "Skyris管理层"]
+        """
+        if not department_names:
+            return
+
+        file_name = os.path.basename(source_file_path)
+
+        for dept_name in department_names:
+            if not dept_name:
+                continue
+            
+            # 团队文件夹路径 (假设在根目录下)
+            team_folder_path = os.path.join(NasManager.NAS_ROOT, dept_name)
+            
+            # 检查团队文件夹是否存在
+            if os.path.exists(team_folder_path) and os.path.isdir(team_folder_path):
+                target_file_path = os.path.join(team_folder_path, file_name)
+                try:
+                    shutil.copy2(source_file_path, target_file_path)
+                    logger.info(f"[NAS团队归档] 成功复制文件到: {target_file_path}")
+                except Exception as e:
+                    logger.error(f"[NAS团队归档] 复制失败 {dept_name}: {e}")
+            else:
+                logger.debug(f"[NAS团队归档] 忽略: 团队文件夹不存在 ({dept_name})")
+
 
     @staticmethod
     def archive_file(local_file_path, user_name, user_id):

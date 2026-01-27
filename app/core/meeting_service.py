@@ -134,6 +134,101 @@ def get_meeting_detail(meeting_id, user_access_token):
         logger.error(f"[获取会议详情异常] {e}")
     return None
 
+def get_meeting_participants(meeting_id, user_access_token):
+    """
+    获取会议参会人列表 (用于判断是否有HR)
+    """
+    url = f"https://open.feishu.cn/open-apis/vc/v1/meetings/{meeting_id}/participants"
+    headers = {
+        "Authorization": f"Bearer {user_access_token}"
+    }
+    params = {
+        "page_size": 100 
+    }
+    
+    participants = []
+    try:
+        while True:
+            resp = requests.get(url, headers=headers, params=params)
+            if resp.status_code != 200:
+                logger.warning(f"[获取参会人失败] Code: {resp.status_code}, Body: {resp.text}")
+                break
+                
+            data = resp.json()
+            if data.get("code") != 0:
+                 break
+                 
+            items = data.get("data", {}).get("participants", [])
+            participants.extend(items)
+            
+            if not data.get("data", {}).get("has_more"):
+                break
+            params["page_token"] = data.get("data", {}).get("page_token")
+            
+        return participants
+    except Exception as e:
+        logger.error(f"[获取参会人异常] {e}")
+        return []
+
+def get_department_names_by_ids(department_ids, tenant_access_token):
+    """
+    批量/多次查询部门名称
+    """
+    names = []
+    if not department_ids:
+        return names
+
+    # 简单实现：循环查询 (如果部门多可以考虑优化，但一般人只有1-2个部门)
+    # API: GET /open-apis/contact/v3/departments/:department_id
+    headers = {"Authorization": f"Bearer {tenant_access_token}"}
+    
+    for dept_id in department_ids:
+        # 缓存优化: 实际项目中这里应该加个 LRU 缓存避免重复查
+        url = f"https://open.feishu.cn/open-apis/contact/v3/departments/{dept_id}"
+        params = {"department_id_type": "open_department_id"}
+        try:
+            resp = requests.get(url, headers=headers, params=params)
+            data = resp.json()
+            if data.get("code") == 0:
+                name = data.get("data", {}).get("department", {}).get("name")
+                if name:
+                    names.append(name)
+            else:
+                logger.warning(f"[查询部门失败] ID: {dept_id}, Msg: {data.get('msg')}")
+        except Exception as e:
+            logger.error(f"[查询部门异常] {e}")
+    return names
+
+def get_user_departments_from_api(user_id, tenant_access_token):
+    """
+    从 API 获取用户的部门名称列表
+    API: GET /open-apis/contact/v3/users/:user_id
+    """
+    if not tenant_access_token:
+        return []
+        
+    url = f"https://open.feishu.cn/open-apis/contact/v3/users/{user_id}"
+    headers = {"Authorization": f"Bearer {tenant_access_token}"}
+    params = {
+        "user_id_type": "open_id", # user_id 通常是 open_id
+        "department_id_type": "open_department_id"
+    }
+    
+    try:
+        resp = requests.get(url, headers=headers, params=params)
+        data = resp.json()
+        if data.get("code") == 0:
+            user_data = data.get("data", {}).get("user", {})
+            dept_ids = user_data.get("department_ids", [])
+            # 再去查部门详情
+            return get_department_names_by_ids(dept_ids, tenant_access_token)
+        else:
+            logger.warning(f"[API查用户部门失败] Code: {data.get('code')}, Msg: {data.get('msg')}")
+            return []
+    except Exception as e:
+        logger.error(f"[API查用户部门异常] {e}")
+        return []
+
 def get_user_info(user_id, user_access_token):
     """
     获取用户信息 (用于生成文件名)
