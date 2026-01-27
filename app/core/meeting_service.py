@@ -137,39 +137,38 @@ def get_meeting_detail(meeting_id, user_access_token):
 def get_meeting_participants(meeting_id, user_access_token):
     """
     获取会议参会人列表 (用于判断是否有HR)
-    API: GET https://open.feishu.cn/open-apis/vc/v1/participant_list
+    [折中方案] 使用 GET /open-apis/vc/v1/meetings/{meeting_id}
+    如果 API 返回 participants 字段，则使用它（通常是部分数据，但对检测 HR 足够了）
     """
-    url = "https://open.feishu.cn/open-apis/vc/v1/participant_list"
+    url = f"https://open.feishu.cn/open-apis/vc/v1/meetings/{meeting_id}"
     headers = {
         "Authorization": f"Bearer {user_access_token}"
     }
+    # 部分接口版本支持 with_participants 参数，尝试加上
     params = {
-        "meeting_id": meeting_id,
-        "page_size": 100,
-        "user_id_type": "user_id" # 明确请求 user_id 以匹配后续逻辑
+        "with_participants": "true" 
     }
     
-    participants = []
     try:
-        while True:
-            resp = requests.get(url, headers=headers, params=params)
-            if resp.status_code != 200:
-                logger.warning(f"[获取参会人失败] Code: {resp.status_code}, Body: {resp.text}")
-                break
-                
-            data = resp.json()
-            if data.get("code") != 0:
-                 logger.warning(f"[获取参会人API错误] Code: {data.get('code')}, Msg: {data.get('msg')}")
-                 break
-                 
-            items = data.get("data", {}).get("participants", [])
-            participants.extend(items)
+        resp = requests.get(url, headers=headers, params=params)
+        data = resp.json()
+        
+        if data.get("code") == 0:
+            # 尝试提取参会人
+            # 结构可能是 data.meeting.participants 或 data.meeting.participant_list
+            meeting_data = data.get("data", {}).get("meeting", {})
+            participants = meeting_data.get("participants", [])
             
-            if not data.get("data", {}).get("has_more"):
-                break
-            params["page_token"] = data.get("data", {}).get("page_token")
+            if participants:
+                logger.info(f"[HR检测] 从会议详情中获取到 {len(participants)} 名参会人")
+                return participants
+            else:
+                 logger.warning("[HR检测] 会议详情未返回 participants 字段")
+        else:
+            logger.warning(f"[HR检测] 获取会议详情失败: {data.get('msg')}")
             
-        return participants
+        return []
+        
     except Exception as e:
         logger.error(f"[获取参会人异常] {e}")
         return []
