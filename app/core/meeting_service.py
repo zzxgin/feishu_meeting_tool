@@ -137,13 +137,16 @@ def get_meeting_detail(meeting_id, user_access_token):
 def get_meeting_participants(meeting_id, user_access_token):
     """
     获取会议参会人列表 (用于判断是否有HR)
+    API: GET https://open.feishu.cn/open-apis/vc/v1/participant_list
     """
-    url = f"https://open.feishu.cn/open-apis/vc/v1/meetings/{meeting_id}/participants"
+    url = "https://open.feishu.cn/open-apis/vc/v1/participant_list"
     headers = {
         "Authorization": f"Bearer {user_access_token}"
     }
     params = {
-        "page_size": 100 
+        "meeting_id": meeting_id,
+        "page_size": 100,
+        "user_id_type": "user_id" # 明确请求 user_id 以匹配后续逻辑
     }
     
     participants = []
@@ -156,6 +159,7 @@ def get_meeting_participants(meeting_id, user_access_token):
                 
             data = resp.json()
             if data.get("code") != 0:
+                 logger.warning(f"[获取参会人API错误] Code: {data.get('code')}, Msg: {data.get('msg')}")
                  break
                  
             items = data.get("data", {}).get("participants", [])
@@ -209,8 +213,12 @@ def get_user_departments_from_api(user_id, tenant_access_token):
         
     url = f"https://open.feishu.cn/open-apis/contact/v3/users/{user_id}"
     headers = {"Authorization": f"Bearer {tenant_access_token}"}
+    
+    # 动态判断 ID 类型: 以 "ou_" 开头则是 open_id，否则默认为 user_id
+    id_type = "open_id" if str(user_id).startswith("ou_") else "user_id"
+    
     params = {
-        "user_id_type": "open_id", # user_id 通常是 open_id
+        "user_id_type": id_type, 
         "department_id_type": "open_department_id"
     }
     
