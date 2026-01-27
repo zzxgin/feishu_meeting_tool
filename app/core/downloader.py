@@ -234,7 +234,9 @@ def download_single_video(object_token, user_id, user_access_token=None, meeting
 
         
         # 发送通知
-        send_success_notification(user_id, final_file_name, nas_path=display_path)
+        # 将 set 转为 list 传递给通知
+        team_paths_list = list(target_team_folders) if 'target_team_folders' in locals() and target_team_folders else None
+        send_success_notification(user_id, final_file_name, nas_path=display_path, team_paths=team_paths_list)
         
     except Exception as e:
         logger.error(f"下载异常: {e}")

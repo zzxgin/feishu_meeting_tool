@@ -4,20 +4,33 @@ import requests
 from app.utils.logger import logger
 from app.utils.feishu_client import get_tenant_access_token
 
-def send_success_notification(user_id, file_name, nas_path=None):
+def send_success_notification(user_id, file_name, nas_path=None, team_paths=None):
     """
     发送下载成功通知卡片
+    :param team_paths: list of str, 例如 ["Skyris技术部门", "Skyris管理层"]
     """
     token = get_tenant_access_token()
     if not token:
         return
 
     # 构建提示文本
+    content_lines = []
+    content_lines.append(f"✅ **会议录制已自动存档**")
+    content_lines.append(f"📄 文件名：{file_name}")
+
     if nas_path:
-        # 如果归档到了 NAS
-        location_text = f"📂 **已归档至个人NAS目录**: `{nas_path}`"
+        # 个人归档
+        content_lines.append(f"👤 **个人目录**: `{nas_path}`")
     else:
-        location_text = "💾 文件已保存至服务器 downloads 目录"
+        content_lines.append(f"💾 **服务器存储**: `downloads/{file_name}`")
+
+    if team_paths:
+        # 团队归档
+        # 为了美观，如果有多个团队，可以用逗号分隔或者换行
+        teams_str = ", ".join([f"`{t}`" for t in team_paths])
+        content_lines.append(f"🏢 **团队共享**: {teams_str}")
+
+    full_text = "\n".join(content_lines)
 
     # 卡片内容
     card_content = {
@@ -28,14 +41,7 @@ def send_success_notification(user_id, file_name, nas_path=None):
             {
                 "tag": "div",
                 "text": {
-                    "content": f"✅ **会议录制已自动存档**\n📄 文件名：{file_name}",
-                    "tag": "lark_md"
-                }
-            },
-            {
-                "tag": "div",
-                "text": {
-                    "content": location_text,
+                    "content": full_text,
                     "tag": "lark_md"
                 }
             }

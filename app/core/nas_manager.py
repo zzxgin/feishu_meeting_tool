@@ -113,8 +113,8 @@ class NasManager:
             if not dept_name:
                 continue
             
-            # 团队文件夹路径 (假设在根目录下)
-            team_folder_path = os.path.join(NasManager.NAS_ROOT, dept_name)
+            # 团队文件夹路径 (在 @team 子目录下)
+            team_folder_path = os.path.join(NasManager.NAS_ROOT, "@team", dept_name)
             
             # 检查团队文件夹是否存在
             if os.path.exists(team_folder_path) and os.path.isdir(team_folder_path):
