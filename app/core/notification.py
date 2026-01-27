@@ -4,13 +4,20 @@ import requests
 from app.utils.logger import logger
 from app.utils.feishu_client import get_tenant_access_token
 
-def send_success_notification(user_id, file_name):
+def send_success_notification(user_id, file_name, nas_path=None):
     """
     发送下载成功通知卡片
     """
     token = get_tenant_access_token()
     if not token:
         return
+
+    # 构建提示文本
+    if nas_path:
+        # 如果归档到了 NAS
+        location_text = f"📂 **已归档至个人NAS目录**: `{nas_path}`"
+    else:
+        location_text = "💾 文件已保存至服务器 downloads 目录"
 
     # 卡片内容
     card_content = {
@@ -26,15 +33,14 @@ def send_success_notification(user_id, file_name):
                 }
             },
             {
-                "tag": "note",
-                "elements": [
-                    {
-                        "content": "文件已保存至服务器 downloads 目录",
-                        "tag": "lark_md"
-                    }
-                ]
+                "tag": "div",
+                "text": {
+                    "content": location_text,
+                    "tag": "lark_md"
+                }
             }
         ],
+
         "header": {
             "template": "blue",
             "title": {

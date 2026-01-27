@@ -4,6 +4,7 @@ import lark_oapi as lark
 from app.utils.logger import logger
 from app.utils.config import load_config
 from app.data.token_store import token_store
+from app.core.nas_manager import NasManager
 from app.core.notification import send_auth_failed_notification, send_success_notification
 from app.core.meeting_service import get_meeting_detail, get_user_info, refresh_user_token_for_user
 
@@ -158,8 +159,14 @@ def download_single_video(object_token, user_id, user_access_token=None, meeting
         os.rename(temp_file_path, file_path)
         logger.info(f"下载完成: {file_path}")
         
+        # --- NAS 归档 ---
+        display_path = None
+        is_archived, archived_path, nas_folder = NasManager.archive_file(file_path, user_name, user_id)
+        if is_archived:
+            display_path = f"NAS/{nas_folder}"  # 卡片上显示: NAS/zhangsan
+        
         # 发送通知
-        send_success_notification(user_id, final_file_name)
+        send_success_notification(user_id, final_file_name, nas_path=display_path)
         
     except Exception as e:
         logger.error(f"下载异常: {e}")

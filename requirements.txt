@@ -4,3 +4,4 @@ lark-oapi
 pycryptodome
 python-dotenv
 waitress
+pypinyin==0.49.0
