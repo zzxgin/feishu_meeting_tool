@@ -101,8 +101,14 @@ def get_recording_info(meeting_id, user_access_token, user_id=None):
 
         if resp.status_code == 200:
             return resp.json()
+        elif resp.json().get('code') == 121004:
+            # 121004: data not exist (通常指妙记还在生成中)
+            # 降级日志为 INFO，避免 ERROR 刷屏误导
+            # 可以通过 user_id 提示是谁的会议
+            logger.info(f"[录制生成中] 用户 {user_id} 的会议 {meeting_id} 暂无录制文件 (飞书转码中)，稍后重试...")
+            return None
         else:
-            logger.error(f"[获取录制信息失败] Status: {resp.status_code}, Body: {resp.text}")
+            logger.error(f"[获取录制信息失败] 用户: {user_id} | Status: {resp.status_code}, Body: {resp.text}")
             return None
     except Exception as e:
         logger.error(f"[API请求异常] {e}")

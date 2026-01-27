@@ -11,7 +11,6 @@ from app.core.meeting_service import (
     get_meeting_detail, 
     get_user_info, 
     refresh_user_token_for_user, 
-    get_meeting_participants,
     get_user_departments_from_api 
 )
 # from app.utils.user_cache import UserCache # 移除缓存引用
@@ -193,30 +192,6 @@ def download_single_video(object_token, user_id, user_access_token=None, meeting
                 if owner_depts:
                     logger.info(f"[API查询] Owner {user_name} 所属部门: {owner_depts}")
                     target_team_folders.update(owner_depts)
-                
-                # B. 检测 "Skyris人力资源部" 逻辑 (HR 参会检测)
-                # 只有当会议ID存在时才能检测
-                if meeting_id:
-                    # 获取参会人 (需要 User Token)
-                    participants = get_meeting_participants(meeting_id, user_access_token)
-                    has_hr = False
-                    
-                    if participants:
-                        logger.info(f"[HR检测] 正在检查 {len(participants)} 名参会人的部门...")
-                        for p in participants:
-                            pid = p.get('user_id')
-                            if pid:
-                                # 对每个参会人查 API (注意性能，如果不频繁开会还好)
-                                # 优化：只要命中一个 HR 就停止
-                                p_depts = get_user_departments_from_api(pid, tenant_token)
-                                if any("Skyris人力资源部" in d for d in p_depts):
-                                    has_hr = True
-                                    logger.info(f"[HR检测] 发现 HR 参会: {p.get('user_name', pid)}")
-                                    break
-                    
-                    if has_hr:
-                        logger.info(f"[团队归档] 检测到 HR 参会，追加 Skyris人力资源部")
-                        target_team_folders.add("Skyris人力资源部")
             else:
                 logger.error("[团队归档] 无法获取 Tenant Token，跳过部门查询")
 
