@@ -1,6 +1,7 @@
 import os
 import json
 import shutil
+import pwd
 from pypinyin import lazy_pinyin
 from app.utils.logger import logger
 
@@ -18,47 +19,84 @@ class NasManager:
             except Exception:
                 return {}
         return {}
+    
+    @staticmethod
+    def _find_folder_by_owner_name(target_username):
+        """
+        遍历 /nas_data 下的所有目录，寻找 owner 是 target_username 的目录
+        例如: 目录 "1014" 的 owner 是 "zhangzixin"，则输入 "zhangzixin" 返回 "1014"
+        """
+        if not os.path.exists(NasManager.NAS_ROOT):
+            return None
+            
+        try:
+            # 遍历一级子目录
+            for item in os.listdir(NasManager.NAS_ROOT):
+                full_path = os.path.join(NasManager.NAS_ROOT, item)
+                if os.path.isdir(full_path):
+                    # 获取该目录的 UID
+                    stat_info = os.stat(full_path)
+                    uid = stat_info.st_uid
+                    try:
+                        # 通过 UID 反查用户名 (需要挂载 /etc/passwd)
+                        owner_name = pwd.getpwuid(uid).pw_name
+                        if owner_name == target_username:
+                            logger.info(f"[NAS匹配] 找到目录: {item} (UID: {uid}, Owner: {owner_name})")
+                            return item
+                    except KeyError:
+                        # 容器内找不到该 UID 对应的用户
+                        continue
+        except Exception as e:
+            logger.error(f"[NAS匹配] 遍历目录查找 owner 失败: {e}")
+        return None
 
     @staticmethod
     def get_nas_folder(user_name, user_id):
         """
-        根据用户姓名寻找 NAS 目录
+        根据用户姓名寻找 NAS 目录 (支持数字目录名+用户名归属匹配)
         优先级:
-        1. 手动映射表 (app/data/nas_mapping.json)
-        2. 全拼匹配 (张三 -> zhangsan)
-        3. 英文名直接匹配 (Shelly -> shelly)
-        4. 首字母匹配 (张三 -> zs) - 可选，暂不开启防止误判
+        1. 手动映射表
+        2. 全拼匹配 (Owner Name)
+        3. 英文名匹配 (Owner Name)
         """
         if not user_name:
             return None
 
         # 1. 查映射表
         mapping = NasManager._load_mapping()
-        # 支持按 user_id 查
         if user_id in mapping:
             folder = mapping[user_id]
             if os.path.exists(os.path.join(NasManager.NAS_ROOT, folder)):
                 return folder
 
-        # 清洗名字 (去掉空格，转小写)
+        # 清洗名字
         clean_name = user_name.strip().lower()
 
-        # 2. 尝试全拼 (张三 -> zhangsan)
-        # lazy_pinyin 会把 "张三" 变成 ['zhang', 'san']，"Shelly" 还是 ['Shelly']
+        # 拼音转换 (张三 -> zhangsan)
         pinyin_list = lazy_pinyin(clean_name)
         pinyin_name = "".join(pinyin_list).lower()
         
-        target_path = os.path.join(NasManager.NAS_ROOT, pinyin_name)
-        if os.path.exists(target_path):
+        logger.info(f"[NAS匹配] 正在查找 Owner 为 '{pinyin_name}' 或 '{clean_name}' 的目录...")
+
+        # 2. 尝试按 Owner 查找 (拼音)
+        # 例如: 目录名为 "1014"，Owner 为 "zhangzixin"
+        folder_by_pinyin = NasManager._find_folder_by_owner_name(pinyin_name)
+        if folder_by_pinyin:
+            return folder_by_pinyin
+            
+        # 3. 尝试按 Owner 查找 (原名/英文名)
+        if clean_name != pinyin_name:
+             folder_by_raw = NasManager._find_folder_by_owner_name(clean_name)
+             if folder_by_raw:
+                 return folder_by_raw
+
+        # 4. 保底: 如果还是找不到，尝试直接匹配目录名 (兼容非数字目录的情况)
+        target_path_direct = os.path.join(NasManager.NAS_ROOT, pinyin_name)
+        if os.path.exists(target_path_direct):
             return pinyin_name
 
-        # 3. 尝试直接匹配 (针对纯英文名的情况，如 "Shelly")
-        # 如果 lazy_pinyin 没变（说明是英文），上面其实已经覆盖了，但为保险再查一次原名
-        target_path_raw = os.path.join(NasManager.NAS_ROOT, clean_name)
-        if os.path.exists(target_path_raw):
-            return clean_name
-
         return None
+
 
     @staticmethod
     def archive_file(local_file_path, user_name, user_id):

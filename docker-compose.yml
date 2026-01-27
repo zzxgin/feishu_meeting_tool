@@ -13,6 +13,9 @@ services:
       - ./logs:/app/logs
       # 挂载 NAS 存储池
       - /vol1:/nas_data
+      # 挂载用户配置文件，以便容器能识别 NAS 用户名 (UID->Name)
+      - /etc/passwd:/etc/passwd:ro
+      - /etc/group:/etc/group:ro
       - /etc/localtime:/etc/localtime:ro
     env_file:
       - .env
