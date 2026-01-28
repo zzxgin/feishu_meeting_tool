@@ -1,4 +1,4 @@
-# 飞书妙记自动下载助手 (Feishu Meeting Auto-Downloader)
+# 飞书视频会议录制自动归档工具 (Feishu Meeting Auto-Downloader)
 
 ## 项目简介
 这是一个基于 Python Flask + Waitress 开发的自动化工具，旨在解决飞书/Lark 会议录制文件的自动归档问题。
