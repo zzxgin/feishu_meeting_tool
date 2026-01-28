@@ -31,27 +31,24 @@ def do_download_task(token, user_id, meeting_id=None):
 def check_recording_loop(meeting_id, owner_id, attempt=1):
     """
     轮询检查录制是否生成 (适用于手动创建的会议)
-    采取阶梯式重试策略，最大覆盖约 60 分钟。
+    采取阶梯式重试策略，最大覆盖约 30 分钟。
     """
     # [策略配置]
-    # 阶段1 (0-5分): 30秒一次, attempt 1-10 (始终日志)
-    # 阶段2 (5-20分): 60秒一次, attempt 11-25 (每5次日志)
-    # 阶段3 (20-60分): 300秒一次, attempt 26-33 (完全静默)
+    # 阶段1 (0-5分): 60秒一次, attempt 1-5 (每次日志)
+    # 阶段2 (5-30分): 300秒一次, attempt 6-10 (每次日志)
+    # 超时: >30分 (停止)
     
     interval = 60
-    silent = True
+    silent = False
     
-    if attempt <= 10:
-        interval = 30
-        silent = False        
-    elif attempt <= 25:
+    if attempt <= 5:
         interval = 60
-        silent = (attempt % 5 != 0) 
-    elif attempt <= 33:
-        interval = 300
-        silent = True         
+        silent = False        # 前5分钟: 每60秒一次
+    elif attempt <= 10:
+        interval = 300        # 5-30分钟: 每300秒(5分钟)一次
+        silent = False        # 每次都打印
     else:
-        logger.warning(f"[监测停止] 会议 {meeting_id} 超过60分钟未生成录制文件，判定为无录制，停止任务。")
+        logger.warning(f"[监测停止] 会议 {meeting_id} 超过30分钟未生成录制文件，判定为无录制，停止任务。")
         return
     
     # 1. Token 检查
