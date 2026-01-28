@@ -9,5 +9,4 @@ app/**/__pycache__/
 logs/
 .DS_Store
 feishu_users.csv
-export_feishu_users.py
 feishu_users_pinyin.csv
