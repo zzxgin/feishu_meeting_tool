@@ -63,11 +63,12 @@ def refresh_user_token_for_user(user_id, current_refresh_token):
         logger.error(f"--- [Token刷新请求异常] {e} ---")
         return None, None
 
-def get_recording_info(meeting_id, user_access_token, user_id=None):
+def get_recording_info(meeting_id, user_access_token, user_id=None, silent=False):
     """
     通过 user_access_token 查询会议录制信息
     权限要求: vc:record:readonly
     增加了 Token 自动刷新机制
+    :param silent: 是否静默模式 (不打印日志)
     """
     url = f"https://open.feishu.cn/open-apis/vc/v1/meetings/{meeting_id}/recording"
     
@@ -102,10 +103,10 @@ def get_recording_info(meeting_id, user_access_token, user_id=None):
         if resp.status_code == 200:
             return resp.json()
         elif resp.json().get('code') == 121004:
-            # 121004: data not exist (通常指妙记还在生成中)
-            # 降级日志为 INFO，避免 ERROR 刷屏误导
-            # 可以通过 user_id 提示是谁的会议
-            logger.info(f"[录制生成中] 用户 {user_id} 的会议 {meeting_id} 暂无录制文件 (飞书转码中)，稍后重试...")
+            # 121004: data not exist (可能场景: 1. 正在生成中 2. 未包含录制文件)
+            # 降级日志为 INFO/DEBUG
+            if not silent:
+                logger.info(f"[状态检测] 会议 {meeting_id} 暂未检测到录制文件 (可能未录制或生成中)，将在后台持续监测...")
             return None
         else:
             logger.error(f"[获取录制信息失败] 用户: {user_id} | Status: {resp.status_code}, Body: {resp.text}")

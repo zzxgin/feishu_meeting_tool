@@ -40,7 +40,8 @@ class NasManager:
                     try:
                         # 通过 UID 反查用户名 (需要挂载 /etc/passwd)
                         owner_name = pwd.getpwuid(uid).pw_name
-                        if owner_name == target_username:
+                        # 忽略大小写进行匹配
+                        if owner_name.lower() == target_username.lower():
                             logger.info(f"[NAS匹配] 找到目录: {item} (UID: {uid}, Owner: {owner_name})")
                             return item
                     except KeyError:
@@ -90,12 +91,18 @@ class NasManager:
              if folder_by_raw:
                  return folder_by_raw
 
-        # 4. 保底: 如果还是找不到，尝试直接匹配目录名 (兼容非数字目录的情况)
-        target_path_direct = os.path.join(NasManager.NAS_ROOT, pinyin_name)
-        if os.path.exists(target_path_direct):
-            return pinyin_name
-
-        return None
+        # 4. 保底: 如果还是找不到，尝试直接匹配目录名 (兼容非数字目录的情况, 忽略大小写)
+        try:
+            if os.path.exists(NasManager.NAS_ROOT):
+                for item in os.listdir(NasManager.NAS_ROOT):
+                    # 匹配拼音 (zhangsan -> ZHANGSAN) 或 英文名 (leo -> LEO)
+                    if item.lower() == pinyin_name or item.lower() == clean_name:
+                         # 再次确认是目录
+                         if os.path.isdir(os.path.join(NasManager.NAS_ROOT, item)):
+                             logger.info(f"[NAS匹配] 目录名直接匹配成功(忽略大小写): {item}")
+                             return item
+        except Exception as e:
+            logger.warning(f"[NAS匹配] 目录遍历匹配失败: {e}")
 
     @staticmethod
     def save_to_team_folder(source_file_path, department_names):
