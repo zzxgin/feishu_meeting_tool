@@ -86,10 +86,27 @@ def check_recording_loop(meeting_id, owner_id, attempt=1):
 
 def do_p2_meeting_ended(data: P2VcMeetingAllMeetingEndedV1) -> None:
     try:
-        # 修正：根据 SDK 结构，meeting_id 和 owner 信息在 data.event.meeting 下
-        meeting_id = data.event.meeting.id  
-        owner_id = data.event.meeting.owner.id.user_id
+        # 1. 基础完整性检查
+        if not data or not data.event or not data.event.meeting:
+            logger.error(f"[事件数据异常] 接收到的事件缺少 meeting 信息")
+            return
+
+        # 2. 安全获取 Meeting ID
+        meeting_id = data.event.meeting.id
+        if not meeting_id:
+             logger.error(f"[事件数据异常] 会议 ID 为空")
+             return
+
+        # 3. 安全获取 Owner ID
+        owner_id = None
+        if data.event.meeting.owner and data.event.meeting.owner.id:
+            owner_id = data.event.meeting.owner.id.user_id
         
+        # 如果没有 Owner ID (可能是无主会议或其他情况)，尝试记录日志并退出，防止崩溃
+        if not owner_id:
+            logger.warning(f"[事件侦测] 会议 {meeting_id} 未能获取到 Owner ID (event.meeting.owner 为空)，无法归档。")
+            return
+
         logger.info(f"[事件侦测] 会议结束 (All Meeting Ended) | ID: {meeting_id} | Owner: {owner_id} | 启动查询...")
         
         # 延迟 30秒开始第一次检查
@@ -97,4 +114,4 @@ def do_p2_meeting_ended(data: P2VcMeetingAllMeetingEndedV1) -> None:
         t.start()
         
     except Exception as e:
-        logger.error(f"[事件处理错误] {e}")
+        logger.error(f"[事件处理错误] {e} | Data dump: {data.event.meeting if data and data.event else 'No Data'}")
