@@ -8,7 +8,7 @@ from app.utils.logger import logger
 class NasManager:
     # 容器映射路径 (对应宿主机 /vol1)
     NAS_ROOT = "/nas_data"
-    MAPPING_FILE = "app/data/nas_mapping.json"
+    MAPPING_FILE = "user_token/nas_mapping.json"
 
     @staticmethod
     def _load_mapping():
@@ -65,6 +65,7 @@ class NasManager:
 
         # 1. 查映射表
         mapping = NasManager._load_mapping()
+        # 1.1 精确匹配 user_id (人工手动配置的优先级最高)
         if user_id in mapping:
             folder = mapping[user_id]
             if os.path.exists(os.path.join(NasManager.NAS_ROOT, folder)):
@@ -78,6 +79,19 @@ class NasManager:
         pinyin_name = "".join(pinyin_list).lower()
         
         logger.info(f"[NAS匹配] 正在查找 Owner 为 '{pinyin_name}' 或 '{clean_name}' 的目录...")
+
+        # 1.2 映射表匹配 (自动生成的 Host 用户名映射)
+        # 映射表中可能是 {"shelly": "1001", "zhangsan": "1002"}
+        # 注意：映射表中的 key 建议存为小写
+        if pinyin_name in mapping:
+            folder = mapping[pinyin_name]
+            logger.info(f"[NAS匹配] 映射表由拼音命中: {pinyin_name} -> {folder}")
+            return folder
+            
+        if clean_name in mapping:
+            folder = mapping[clean_name]
+            logger.info(f"[NAS匹配] 映射表由英文名命中: {clean_name} -> {folder}")
+            return folder
 
         # 2. 尝试按 Owner 查找 (拼音)
         # 例如: 目录名为 "1014"，Owner 为 "zhangzixin"

@@ -121,6 +121,41 @@ docker run -d \
 *   `/app/user_token`: 映射本地目录存储 `user_tokens.json`。
 *   `/etc/localtime`: 挂载宿主机时间，确保日志时间正确。
 
+## NAS 用户权限映射 (重要)
+
+由于 Docker 容器内的用户环境与宿主机（NAS）隔离，常出现“宿主机上是 Shelly (UID 1001)，容器内被识别为 zouxiaolian (UID 1001)”的情况，导致归档目录识别失败。
+
+**解决方案：**
+
+我们利用 `generate_mapping.py` 脚本在 **宿主机** 上生成真实的 `Mapping File`，容器通过共享挂载直接读取此文件来匹配用户。
+
+### 1. 宿主机运行生成脚本
+在 NAS 宿主机（PVE/群晖/TrueNAS）的终端中运行：
+
+```bash
+# 假设项目已 clone 到 /vol1/feishu_minute
+# 参数说明: python3 generate_mapping.py [NAS数据根目录]
+python3 /vol1/feishu_minute/generate_mapping.py /vol1
+```
+
+*   此脚本会扫描 `/vol1` 下的目录，基于宿主机的 `/etc/passwd` 解析 UID 真实的归属用户名。
+*   生成的映射文件会保存在 `user_token/nas_mapping.json` (该目录已通过 Docker Volume 共享给容器)。
+
+### 2. 何时需要运行？
+*   **初始部署时**: 必须运行一次。
+*   **新增 NAS 用户时**: 运行一次。
+*   **修改 NAS 用户名时**: 运行一次。
+
+建议设置宿主机 Crontab 每日自动更新：
+```bash
+# 每天凌晨 3 点自动刷新 NAS 用户映射 (路径请根据实际情况修改)
+0 3 * * * python3 /vol1/feishu_minute/generate_mapping.py /vol1 >/dev/null 2>&1
+```
+
+### 3. 原理说明
+*   容器不再依赖自身的 `/etc/passwd` 进行用户解析，而是优先读取 `nas_mapping.json`。
+*   即使 Docker 容器内显示文件归属为 `root` 或 `zouxiaolian`，只要映射表中记录了 `"Shelly": "1001"`，程序就能正确将文件归档到 `/nas_data/1001` (即 `Shelly` 的目录)。
+
 ## GitLab CI/CD 自动化部署
 
 本项目已配置完整的 CI/CD 流程 (Test -> Build -> Deploy)，适配 **Harbor 镜像仓库** 和 **SSH 远程部署**。
