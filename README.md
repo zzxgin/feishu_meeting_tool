@@ -153,8 +153,8 @@ python3 /vol1/feishu_minute/generate_mapping.py /vol1
 ```
 
 ### 3. 原理说明
-*   容器不再依赖自身的 `/etc/passwd` 进行用户解析，而是优先读取 `nas_mapping.json`。
-*   即使 Docker 容器内显示文件归属为 `root` 或 `zouxiaolian`，只要映射表中记录了 `"Shelly": "1001"`，程序就能正确将文件归档到 `/nas_data/1001` (即 `Shelly` 的目录)。
+*   **绕过隔离**: 脚本在宿主机运行，能直接获取准确的用户归属信息（如 `UID 1001` -> `Shelly`），绕过了容器内 `/etc/passwd` 数据滞后或不一致的问题。
+*   **实时生效**: 映射文件存储在挂载的 **目录** (`user_token/`) 中。与直接挂载单个文件（如 `/etc/passwd` 会因宿主机文件替换导致容器持有旧文件句柄）不同，目录挂载允许容器实时读取到宿主机重新生成的新文件，因此更新映射后 **无需重启容器** 即可生效。
 
 ## GitLab CI/CD 自动化部署
 
